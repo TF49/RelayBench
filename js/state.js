@@ -1,6 +1,6 @@
 // 全局状态 + 持久化。Key 只在内存，除非站点/评审勾选「记住 Key」。
 import { db } from './store/db.js';
-import { DEFAULT_SETTINGS, MAX_GLOBAL_CONCURRENCY } from './core/runner.js';
+import { DEFAULT_SETTINGS, MAX_GLOBAL_CONCURRENCY, PRESETS } from './core/runner.js';
 import { pickJudgeModel } from './core/judge.js';
 
 const listeners = new Set();
@@ -41,7 +41,15 @@ export async function loadAll() {
     db.getAll('runs'),
   ]);
   state.sites = (sites || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => ({ apiKey: '', ...s }));
-  if (settings) state.settings = { ...DEFAULT_SETTINGS, ...settings };
+  if (settings) {
+    state.settings = { ...DEFAULT_SETTINGS, ...settings };
+    // 旧版本（每模型 10 次 + 4 道题）没有 probeSet：切到快速档
+    if (!settings.probeSet) {
+      const { requestsPerModel, probeSet } = PRESETS.quick;
+      Object.assign(state.settings, { requestsPerModel, probeSet });
+      delete state.settings.qualityProbes;
+    }
+  }
   state.settings.concurrencyGlobal = Math.min(MAX_GLOBAL_CONCURRENCY, state.settings.concurrencyGlobal);
   state.settings.concurrencyPerSite = Math.min(MAX_GLOBAL_CONCURRENCY, state.settings.concurrencyPerSite);
   if (judge) {

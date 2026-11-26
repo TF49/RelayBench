@@ -20,7 +20,7 @@ export function buildJudgePrompt(item) {
     .filter((r) => !r.ok && r.errorType !== 'aborted')
     .slice(0, 5)
     .map((r) => ({ 类型: ERROR_LABELS[r.errorType] || r.errorType, HTTP: r.status || null, 信息: (r.errorMessage || '').slice(0, 200) }));
-  const probes = QUALITY_PROBES.map((p) => {
+  const probes = QUALITY_PROBES.filter((p) => item.records.some((x) => x.kind === 'probe' && x.probeId === p.id)).map((p) => {
     const r = item.records.find((x) => x.kind === 'probe' && x.probeId === p.id);
     return {
       题目: p.prompt,

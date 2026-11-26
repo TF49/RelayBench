@@ -1,7 +1,7 @@
 // 调度：站点 × 模型 × N 次请求，全局并发 + 每站并发，可中止；随后规则打分与 AI 评审。
 import { runChat as defaultRunChat, completeOnce as defaultCompleteOnce, resolveProtocol } from './client.js';
 import { detectSite as defaultDetectSite, balanceDelta } from './relay.js';
-import { stabilityPrompt, QUALITY_PROBES, getProbe } from './probes.js';
+import { stabilityPrompt, probesFor, getProbe } from './probes.js';
 import { computeStats, topErrors } from './stats.js';
 import { ruleScore, combineScore, grade } from './scoring.js';
 import { JUDGE_SYSTEM, buildJudgePrompt, parseJudgeResponse, SUMMARY_SYSTEM, buildSummaryPrompt } from './judge.js';
@@ -45,9 +45,27 @@ export class Semaphore {
 
 export const MAX_GLOBAL_CONCURRENCY = 6;
 
+/** 测试档位。每个模型请求数 = requestsPerModel + 质量题数。 */
+export const PRESETS = {
+  quick: { label: '快速', desc: '看通不通、大概快不快', requestsPerModel: 3, probeSet: 'basic' },
+  standard: { label: '标准', desc: '日常对比几个站点', requestsPerModel: 6, probeSet: 'full' },
+  deep: { label: '深度', desc: '认真挑渠道、看稳定性', requestsPerModel: 15, probeSet: 'full' },
+};
+
+export function presetOf(settings) {
+  for (const [key, p] of Object.entries(PRESETS)) {
+    if (p.requestsPerModel === settings.requestsPerModel && p.probeSet === settings.probeSet) return key;
+  }
+  return 'custom';
+}
+
+export function requestsPerModelTotal(settings) {
+  return settings.requestsPerModel + probesFor(settings.probeSet).length;
+}
+
 export const DEFAULT_SETTINGS = {
-  requestsPerModel: 10,
-  qualityProbes: true,
+  requestsPerModel: 3,
+  probeSet: 'basic',
   concurrencyPerSite: 3,
   // 浏览器对同一主机（本地代理）最多 6 个 HTTP/1.1 连接，超过会在浏览器内排队
   concurrencyGlobal: 6,
@@ -65,9 +83,7 @@ export function planJobs(sites, settings, rand = Math.random) {
       for (let i = 0; i < settings.requestsPerModel; i += 1) {
         requests.push({ kind: 'stability', prompt: stabilityPrompt(i, rand) });
       }
-      if (settings.qualityProbes) {
-        for (const p of QUALITY_PROBES) requests.push({ kind: 'probe', probeId: p.id, prompt: p.prompt });
-      }
+      for (const p of probesFor(settings.probeSet)) requests.push({ kind: 'probe', probeId: p.id, prompt: p.prompt });
       jobs.push({
         key: `${site.id}::${model}`,
         siteId: site.id,
@@ -94,9 +110,10 @@ export function interleave(jobs) {
 }
 
 function settingsSnapshot(settings, judge) {
-  const { requestsPerModel, qualityProbes, concurrencyPerSite, concurrencyGlobal, ttftTimeoutSec, totalTimeoutSec, aiWeight } = settings;
+  const { requestsPerModel, probeSet, concurrencyPerSite, concurrencyGlobal, ttftTimeoutSec, totalTimeoutSec, aiWeight } = settings;
   return {
-    requestsPerModel, qualityProbes, concurrencyPerSite, concurrencyGlobal, ttftTimeoutSec, totalTimeoutSec, aiWeight,
+    requestsPerModel, probeSet, probeCount: probesFor(probeSet).length,
+    concurrencyPerSite, concurrencyGlobal, ttftTimeoutSec, totalTimeoutSec, aiWeight,
     judgeModel: judge?.enabled ? judge.model : null,
   };
 }

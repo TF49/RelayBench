@@ -5,6 +5,7 @@ import {
 } from '../core/relay.js';
 import { esc, toast, fmtBalance, maskKey, fmtTime, fmtMs, fmtPct, fmtNum, scoreColor, confirmBox, $ } from './dom.js';
 import { startRun } from './run.js';
+import { presetSwitchHtml, handlePresetClick } from './preset.js';
 import { ERROR_LABELS } from '../core/errors.js';
 
 const ui = { panel: '', checking: new Set() };
@@ -48,6 +49,7 @@ export function render(root) {
         <button class="btn primary" data-act="run-all">开始测试全部 →</button>
       </div>
     </div>
+    <div class="actions" style="margin:-6px 0 16px;gap:12px" id="preset-bar"><span class="muted">测试档位</span>${presetSwitchHtml()}</div>
 
     <form class="panel panel-pad collapse ${ui.panel === 'add' ? '' : 'hidden'}" id="add-form" autocomplete="off">
       <h2>添加站点</h2>
@@ -88,6 +90,10 @@ export function render(root) {
 }
 
 export function onState(what) {
+  if (what === 'settings') {
+    const bar = rootRef && $('#preset-bar', rootRef);
+    if (bar) bar.innerHTML = `<span class="muted">测试档位</span>${presetSwitchHtml()}`;
+  }
   if (what === 'sites' || what === 'settings') rerenderList();
 }
 
@@ -181,6 +187,7 @@ function lastResultTemplate(s) {
 }
 
 async function onClick(e) {
+  if (await handlePresetClick(e)) return undefined;
   const btn = e.target.closest('[data-act]');
   if (!btn) return;
   const act = btn.dataset.act;

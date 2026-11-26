@@ -91,6 +91,18 @@ export const QUALITY_PROBES = [
   },
 ];
 
+/** 质量题组：none 不跑；basic 只跑算术 + JSON（快速档）；full 全部 4 道。 */
+export const PROBE_SETS = {
+  none: [],
+  basic: ['arith', 'json'],
+  full: ['arith', 'format', 'json', 'reason'],
+};
+
+export function probesFor(set) {
+  const ids = PROBE_SETS[set] || PROBE_SETS.basic;
+  return QUALITY_PROBES.filter((p) => ids.includes(p.id));
+}
+
 export function getProbe(id) {
   return QUALITY_PROBES.find((p) => p.id === id);
 }

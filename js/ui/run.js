@@ -1,7 +1,9 @@
 // 测试视图 + 运行控制器（运行状态挂在 state.current 上，切换视图不影响运行）。
 import { state, notify, saveRun, updateSite, resolveJudge } from '../state.js';
 import { runBenchmark } from '../core/runner.js';
-import { QUALITY_PROBES } from '../core/probes.js';
+import { probesFor } from '../core/probes.js';
+import { requestsPerModelTotal } from '../core/runner.js';
+import { presetSwitchHtml, handlePresetClick } from './preset.js';
 import { ERROR_LABELS } from '../core/errors.js';
 import { SITE_TYPE_LABELS } from '../core/relay.js';
 import { topErrors } from '../core/stats.js';
@@ -144,7 +146,8 @@ let rootRef = null;
 
 export function render(root) {
   rootRef = root;
-  root.onclick = (e) => {
+  root.onclick = async (e) => {
+    if (await handlePresetClick(e)) return;
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'start') startRun();
     else if (act === 'stop') stopRun();
@@ -177,7 +180,8 @@ function draw() {
 function preflightTemplate() {
   const sites = eligibleSites();
   const st = state.settings;
-  const perModel = st.requestsPerModel + (st.qualityProbes ? QUALITY_PROBES.length : 0);
+  const perModel = requestsPerModelTotal(st);
+  const probeN = probesFor(st.probeSet).length;
   const models = sites.reduce((n, s) => n + s.selectedModels.length, 0);
   const skipped = state.sites.length - sites.length;
   const j = state.judge;
@@ -187,11 +191,12 @@ function preflightTemplate() {
       <div><h1>测试</h1><p>对已勾选的模型批量发请求，统计报错、速度和稳定性，再由评审模型打分。</p></div>
     </div>
     <div class="panel panel-pad">
+      <div class="actions" style="margin-bottom:18px;gap:12px"><span class="muted">测试档位</span>${presetSwitchHtml()}</div>
       <div class="stat-row">
         <div class="stat"><div class="v">${sites.length}</div><div class="k">参与站点</div></div>
         <div class="stat"><div class="v">${models}</div><div class="k">站点 × 模型</div></div>
         <div class="stat"><div class="v">${models * perModel}</div><div class="k">请求总数</div></div>
-        <div class="stat"><div class="v">${st.requestsPerModel}<span class="muted" style="font-size:14px"> + ${st.qualityProbes ? QUALITY_PROBES.length : 0}</span></div><div class="k">每模型：稳定性 + 质量题</div></div>
+        <div class="stat"><div class="v">${st.requestsPerModel}<span class="muted" style="font-size:14px"> + ${probeN}</span></div><div class="k">每模型：稳定性 + 质量题</div></div>
         <div class="stat"><div class="v">${st.concurrencyPerSite} / ${st.concurrencyGlobal}</div><div class="k">每站 / 全局并发</div></div>
       </div>
       <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px">
@@ -222,7 +227,7 @@ function liveTemplate(cur) {
       <div class="actions">
         ${running
           ? '<button class="btn danger solid" data-act="stop">停止</button>'
-          : `${cur.run ? '<button class="btn" data-act="report">查看报告</button>' : ''}<button class="btn primary" data-act="start">重新测试</button>`}
+          : `${presetSwitchHtml()}${cur.run ? '<button class="btn" data-act="report">查看报告</button>' : ''}<button class="btn primary" data-act="start">重新测试</button>`}
       </div>
     </div>
     <div id="run-live">

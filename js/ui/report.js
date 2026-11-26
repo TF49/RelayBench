@@ -57,7 +57,7 @@ function draw() {
       <div>
         <h1>测试报告 ${run.aborted ? '<span class="badge warn">中途停止</span>' : ''}</h1>
         <p>${esc(fmtTime(run.startedAt))} · 用时 ${fmtDuration(run.finishedAt - run.startedAt)} · ${run.sites.length} 个站点 · ${run.items.length} 个站点×模型 · ${reqs} 次请求
-          · 每模型 ${run.settings.requestsPerModel} 次${run.settings.qualityProbes ? ` + ${QUALITY_PROBES.length} 道质量题` : ''}
+          · 每模型 ${run.settings.requestsPerModel} 次${probeCountOf(run) ? ` + ${probeCountOf(run)} 道质量题` : ''}
           ${run.settings.judgeModel ? ` · 评审 ${esc(run.settings.judgeModel)}` : ''}</p>
       </div>
       <div class="actions">
@@ -90,6 +90,11 @@ function draw() {
       </table></div>
     </div>
     <p class="faint" style="font-size:12px;margin-top:10px">规则分 = 可用性 45 + 速度 25 + 稳定性 15 + 质量 15；综合分 = 规则分 × ${fmtNum(1 - run.settings.aiWeight, 1)} + AI 分 × ${fmtNum(run.settings.aiWeight, 1)}（无 AI 分时等于规则分）。点击行查看详情。</p>`;
+}
+
+function probeCountOf(run) {
+  // 旧记录只有 qualityProbes 布尔值（当时固定 4 道）
+  return run.settings.probeCount ?? (run.settings.qualityProbes ? QUALITY_PROBES.length : 0);
 }
 
 function aiNotice(run) {

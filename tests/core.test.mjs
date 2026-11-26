@@ -8,7 +8,7 @@ import { percentile, computeStats } from '../js/core/stats.js';
 import { ruleScore, grade, combineScore, linear } from '../js/core/scoring.js';
 import { parseJudgeResponse, buildJudgePrompt, pickJudgeModel } from '../js/core/judge.js';
 import { QUALITY_PROBES, getProbe } from '../js/core/probes.js';
-import { runBenchmark, Semaphore, planJobs, interleave } from '../js/core/runner.js';
+import { runBenchmark, Semaphore, planJobs, interleave, DEFAULT_SETTINGS, PRESETS, presetOf, requestsPerModelTotal } from '../js/core/runner.js';
 
 // ---------------------------------------------------------------- errors
 test('classifyError: new-api / sub2api 典型错误', () => {
@@ -313,6 +313,17 @@ test('buildJudgePrompt 包含统计与质量题', () => {
 });
 
 // ---------------------------------------------------------------- runner
+test('测试档位：快速档默认，每模型 5 次', () => {
+  assert.equal(DEFAULT_SETTINGS.requestsPerModel, 3);
+  assert.equal(presetOf(DEFAULT_SETTINGS), 'quick');
+  assert.equal(requestsPerModelTotal(DEFAULT_SETTINGS), 5);
+  assert.equal(requestsPerModelTotal({ ...DEFAULT_SETTINGS, ...PRESETS.standard }), 10);
+  assert.equal(requestsPerModelTotal({ ...DEFAULT_SETTINGS, ...PRESETS.deep }), 19);
+  assert.equal(presetOf({ requestsPerModel: 7, probeSet: 'basic' }), 'custom');
+  const jobs = planJobs([{ id: 's', name: 'S', baseUrl: 'u', selectedModels: ['m'] }], DEFAULT_SETTINGS);
+  assert.deepEqual(jobs[0].requests.filter((r) => r.kind === 'probe').map((r) => r.probeId), ['arith', 'json']);
+});
+
 test('Semaphore 限制并发且可中止', async () => {
   const s = new Semaphore(1);
   assert.equal(await s.acquire(), true);
@@ -325,7 +336,7 @@ test('Semaphore 限制并发且可中止', async () => {
 });
 
 test('planJobs / interleave', () => {
-  const jobs = planJobs([{ id: 's1', name: 'S', baseUrl: 'u', protocol: 'auto', selectedModels: ['a', 'claude-b'] }], { requestsPerModel: 2, qualityProbes: true });
+  const jobs = planJobs([{ id: 's1', name: 'S', baseUrl: 'u', protocol: 'auto', selectedModels: ['a', 'claude-b'] }], { requestsPerModel: 2, probeSet: 'full' });
   assert.equal(jobs.length, 2);
   assert.equal(jobs[0].requests.length, 6);
   assert.equal(jobs[1].protocol, 'anthropic');
@@ -356,7 +367,7 @@ test('runBenchmark 端到端（注入依赖）', async () => {
   const events = [];
   const run = await runBenchmark({
     sites: [{ id: 's1', name: 'S1', baseUrl: 'https://s1', apiKey: 'sk-secret', protocol: 'auto', selectedModels: ['good', 'bad'] }],
-    settings: { requestsPerModel: 3, concurrencyPerSite: 2, concurrencyGlobal: 8 },
+    settings: { requestsPerModel: 3, probeSet: 'full', concurrencyPerSite: 2, concurrencyGlobal: 8 },
     judge: { enabled: true, baseUrl: 'https://j', apiKey: 'jk', model: 'judge', protocol: 'openai' },
     onEvent: (e) => events.push(e.type),
     deps: { runChat, detectSite, completeOnce },
@@ -385,7 +396,7 @@ test('runBenchmark 中止后跳过评审并标记 aborted', async () => {
   let judgedCalls = 0;
   const run = await runBenchmark({
     sites: [{ id: 's', name: 'S', baseUrl: 'u', apiKey: 'k', selectedModels: ['m'] }],
-    settings: { requestsPerModel: 10, qualityProbes: false, concurrencyPerSite: 1 },
+    settings: { requestsPerModel: 10, probeSet: 'none', concurrencyPerSite: 1 },
     judge: { enabled: true, model: 'j' },
     signal: ctrl.signal,
     deps: { runChat, detectSite: async () => ({ type: 'generic', balance: null }), completeOnce: async () => { judgedCalls += 1; return { ok: false }; } },

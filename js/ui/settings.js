@@ -27,7 +27,12 @@ export function render(root) {
         <label class="field"><span>AI 分权重（0–1）</span><input class="input" type="number" min="0" max="1" step="0.1" name="aiWeight" value="${s.aiWeight}"><small>综合分 = 规则分 × (1−w) + AI 分 × w</small></label>
       </div>
       <div style="margin-top:14px" class="grid">
-        <label class="check"><input type="checkbox" name="qualityProbes" ${s.qualityProbes ? 'checked' : ''}> 运行质量题（算术、指令遵循、JSON、推理，各 1 次）</label>
+        <label class="field"><span>质量题</span>
+          <select class="input" name="probeSet" style="max-width:360px">
+            ${[['none', '不跑质量题'], ['basic', '基础 2 道（算术、JSON）'], ['full', '全部 4 道（算术、指令遵循、JSON、推理）']].map(([v, l]) => `<option value="${v}" ${s.probeSet === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <small>档位（快速 3+2 / 标准 6+4 / 深度 15+4）可在「站点」或「测试」页一键切换；这里改数字即为自定义。</small>
+        </label>
         <label class="field"><span>常用模型关键字（逗号分隔，检测站点时自动预选包含这些关键字的模型）</span>
           <input class="input" name="favoriteKeywords" value="${esc((s.favoriteKeywords || []).join(', '))}">
         </label>
@@ -160,7 +165,7 @@ async function onChange(e) {
       ttftTimeoutSec: clampInt(fd.get('ttftTimeoutSec'), 3, 600, d.ttftTimeoutSec),
       totalTimeoutSec: clampInt(fd.get('totalTimeoutSec'), 5, 1800, d.totalTimeoutSec),
       aiWeight: Number.isFinite(aiWeight) ? Math.min(1, Math.max(0, aiWeight)) : d.aiWeight,
-      qualityProbes: fd.get('qualityProbes') === 'on',
+      probeSet: ['none', 'basic', 'full'].includes(fd.get('probeSet')) ? fd.get('probeSet') : d.probeSet,
       favoriteKeywords: String(fd.get('favoriteKeywords') || '').split(/[,，]/).map((x) => x.trim()).filter(Boolean),
     });
   }
