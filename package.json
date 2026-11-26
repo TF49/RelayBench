@@ -1,0 +1,10 @@
+{
+  "name": "relaybench",
+  "private": true,
+  "type": "module",
+  "description": "中转站渠道稳定性批量测评（浏览器工具 + 本地代理）",
+  "scripts": {
+    "test": "node --test tests/",
+    "start": "python server.py"
+  }
+}
