@@ -7,8 +7,10 @@ import { esc, toast, fmtBalance, maskKey, fmtTime, fmtMs, fmtPct, fmtNum, scoreC
 import { startRun } from './run.js';
 import { presetSwitchHtml, handlePresetClick } from './preset.js';
 import { ERROR_LABELS } from '../core/errors.js';
+import { icon } from './icons.js';
+import { enterPart, listIn, modalIn, modalOut } from './motion.js';
 
-const ui = { panel: '', checking: new Set() };
+const ui = { panel: '', checking: new Set(), seen: new Set() };
 
 export async function checkSite(site) {
   if (!site.apiKey) {
@@ -34,25 +36,29 @@ export async function checkSite(site) {
 
 let rootRef = null;
 
+const btnIc = (name) => `<span class="btn-ic">${icon(name, 14)}</span>`;
+
 export function render(root) {
   rootRef = root;
+  ui.seen = new Set(state.sites.map((s) => s.id));
   root.innerHTML = `
     <div class="page-head">
       <div>
-        <h1>站点</h1>
-        <p>添加中转站地址和该站创建的 API Key，检测后勾选要测的模型。</p>
+        <div class="eyebrow">01 · Sites</div>
+        <h1 data-split>中转站与 Key</h1>
+        <p>添加中转站地址和在该站创建的 API Key。检测会识别站点类型、查询余额并拉取模型列表，然后勾选要测的模型。</p>
       </div>
       <div class="actions">
-        <button class="btn" data-act="toggle-bulk">批量导入</button>
-        <button class="btn" data-act="toggle-add">添加站点</button>
-        <button class="btn" data-act="check-all">全部检测</button>
-        <button class="btn primary" data-act="run-all">开始测试全部 →</button>
+        <button class="btn" data-act="toggle-bulk">${icon('import', 15)}批量导入</button>
+        <button class="btn" data-act="toggle-add">${icon('plus', 15)}添加站点</button>
+        <button class="btn" data-act="check-all">${icon('scan', 15)}全部检测</button>
+        <button class="btn primary has-ic" data-act="run-all" data-magnet="0.22"><span class="shiny">开始测试全部</span>${btnIc('arrow')}</button>
       </div>
     </div>
-    <div class="actions" style="margin:-6px 0 16px;gap:12px" id="preset-bar"><span class="muted">测试档位</span>${presetSwitchHtml()}</div>
+    <div class="preset-bar" style="margin:-8px 0 26px" id="preset-bar" data-reveal><span class="muted">测试档位</span>${presetSwitchHtml()}</div>
 
     <form class="panel panel-pad collapse ${ui.panel === 'add' ? '' : 'hidden'}" id="add-form" autocomplete="off">
-      <h2>添加站点</h2>
+      <h2>${icon('plus', 16)}添加站点</h2>
       <div class="grid c4">
         <label class="field"><span>站点地址 *</span><input class="input" name="baseUrl" placeholder="https://api.example.com" required></label>
         <label class="field"><span>API Key *</span><input class="input" name="apiKey" type="password" placeholder="sk-..." required></label>
@@ -65,19 +71,19 @@ export function render(root) {
           </select>
         </label>
       </div>
-      <div class="actions" style="margin-top:14px;justify-content:space-between">
+      <div class="actions" style="margin-top:18px;justify-content:space-between">
         <label class="check"><input type="checkbox" name="rememberKey"> 在本机浏览器记住 Key</label>
-        <div class="actions"><button type="button" class="btn ghost" data-act="toggle-add">取消</button><button class="btn primary">添加并检测</button></div>
+        <div class="actions"><button type="button" class="btn ghost" data-act="toggle-add">取消</button><button class="btn primary has-ic">添加并检测${btnIc('arrow')}</button></div>
       </div>
     </form>
 
     <form class="panel panel-pad collapse ${ui.panel === 'bulk' ? '' : 'hidden'}" id="bulk-form" autocomplete="off">
-      <h2>批量导入</h2>
-      <p class="muted" style="margin:-4px 0 10px">每行一个站点：<code>地址 Key [名称]</code>，分隔符可用空格、逗号或竖线；<code>#</code> 开头为注释。</p>
+      <h2>${icon('import', 16)}批量导入</h2>
+      <p class="muted" style="margin:-4px 0 12px">每行一个站点：<code class="mono">地址 Key [名称]</code>，分隔符可用空格、逗号或竖线；<code class="mono">#</code> 开头为注释。</p>
       <textarea class="input" name="text" rows="6" placeholder="https://api.site-a.com sk-xxxxxxxxxxxxxxxx 站点A&#10;api.site-b.com, sk-yyyyyyyyyyyyyyyy"></textarea>
-      <div class="actions" style="margin-top:12px;justify-content:space-between">
+      <div class="actions" style="margin-top:16px;justify-content:space-between">
         <label class="check"><input type="checkbox" name="rememberKey"> 在本机浏览器记住 Key</label>
-        <div class="actions"><button type="button" class="btn ghost" data-act="toggle-bulk">取消</button><button class="btn primary">导入并检测</button></div>
+        <div class="actions"><button type="button" class="btn ghost" data-act="toggle-bulk">取消</button><button class="btn primary has-ic">导入并检测${btnIc('arrow')}</button></div>
       </div>
     </form>
 
@@ -86,7 +92,7 @@ export function render(root) {
   root.onclick = onClick;
   root.onsubmit = onSubmit;
   root.onchange = onChange;
-  rerenderList();
+  rerenderList(true);
 }
 
 export function onState(what) {
@@ -97,21 +103,43 @@ export function onState(what) {
   if (what === 'sites' || what === 'settings') rerenderList();
 }
 
-function rerenderList() {
+function rerenderList(mount = false) {
   const box = rootRef && $('#site-list', rootRef);
   if (!box || !box.isConnected) return;
   if (!state.sites.length) {
-    box.innerHTML = `
-      <div class="panel empty">
-        <h3>还没有站点</h3>
-        <p>点「添加站点」或「批量导入」，填入中转站地址和 Key。</p>
-      </div>`;
+    box.innerHTML = emptyTemplate();
+    if (!mount) enterPart(box);
     return;
   }
-  box.innerHTML = `<div class="site-grid">${state.sites.map(siteCard).join('')}</div>`;
+  box.innerHTML = `<div class="site-grid">${state.sites.map((s) => siteCard(s, mount)).join('')}</div>`;
+  if (!mount) {
+    const fresh = state.sites.filter((s) => !ui.seen.has(s.id)).map((s) => box.querySelector(`[data-card="${s.id}"]`)).filter(Boolean);
+    listIn(fresh, { from: 'bottom' });
+  }
+  state.sites.forEach((s) => ui.seen.add(s.id));
 }
 
-function siteCard(s) {
+function emptyTemplate() {
+  return `
+    <div class="panel empty-hero" data-reveal>
+      <div>
+        <div class="eyebrow">Getting started</div>
+        <h3>三步测出哪个中转站最稳</h3>
+        <p>给出地址和 Key，剩下的交给 RelayBench：批量发请求、统计报错与速度，再由 AI 评审打分排名。</p>
+        <div class="actions">
+          <button class="btn primary has-ic" data-act="toggle-add" data-magnet="0.22">添加第一个站点${btnIc('arrow')}</button>
+          <button class="btn" data-act="toggle-bulk">${icon('import', 15)}批量导入</button>
+        </div>
+      </div>
+      <div class="steps">
+        <div class="step"><div class="step-ic">${icon('sites', 20)}</div><div><b>添加站点</b><span>地址 + Key，自动识别 new-api / sub2api 并查余额</span></div></div>
+        <div class="step"><div class="step-ic">${icon('bolt', 20)}</div><div><b>一键测试</b><span>快速档每个模型 5 次请求，实时看报错和首字延迟</span></div></div>
+        <div class="step"><div class="step-ic">${icon('spark', 20)}</div><div><b>AI 打分</b><span>评审模型给出分数、结论与建议，生成排行榜</span></div></div>
+      </div>
+    </div>`;
+}
+
+function siteCard(s, mount) {
   const checking = ui.checking.has(s.id);
   const typeBadge = s.type === 'unknown'
     ? '<span class="badge">未检测</span>'
@@ -121,38 +149,41 @@ function siteCard(s) {
     + (sel.length > 6 ? `<span class="chip more">+${sel.length - 6}</span>` : '');
   const keyCell = s.apiKey
     ? `<span class="mono">${esc(maskKey(s.apiKey))}</span> ${s.rememberKey ? '<span class="badge">已记住</span>' : '<span class="badge">仅本次</span>'}`
-    : `<div class="inline-form"><input class="input" type="password" placeholder="Key 未保存，请重新输入" data-key-input="${s.id}" style="height:28px"><button class="btn sm" data-act="set-key" data-id="${s.id}">确定</button></div>`;
+    : `<div class="inline-form"><input class="input sm" type="password" placeholder="Key 未保存，请重新输入" data-key-input="${s.id}"><button class="btn sm" data-act="set-key" data-id="${s.id}">确定</button></div>`;
+  const initial = esc((s.name || '?').trim().slice(0, 1));
   return `
-    <div class="panel site-card">
+    <article class="panel site-card spotlight" data-card="${s.id}" ${mount ? 'data-reveal' : ''}>
       <div class="head">
-        <div style="min-width:0">
-          <div class="name">${esc(s.name)}</div>
-          <div class="url">${esc(s.baseUrl)}</div>
+        <div class="site-id">
+          <div class="site-avatar">${initial}</div>
+          <div style="min-width:0">
+            <div class="name">${esc(s.name)}</div>
+            <div class="url">${esc(s.baseUrl)}</div>
+          </div>
         </div>
-        ${checking ? '<span class="spinner" title="检测中"></span>' : typeBadge}
+        ${checking ? '<span class="badge accent"><span class="radar" style="width:12px;height:12px"></span>检测中</span>' : typeBadge}
       </div>
       <dl class="kv">
         <dt>Key</dt><dd>${keyCell}</dd>
-        <dt>余额</dt><dd>${esc(fmtBalance(s.balance))}${s.balance?.note ? ` <span class="faint">${esc(s.balance.note)}</span>` : ''}</dd>
+        <dt>余额</dt><dd><b class="num" style="font-weight:600">${esc(fmtBalance(s.balance))}</b>${s.balance?.note ? ` <span class="faint">${esc(s.balance.note)}</span>` : ''}</dd>
         <dt>协议</dt><dd>
-          <select class="input" data-protocol="${s.id}" style="height:28px;width:auto">
+          <select class="input sm" data-protocol="${s.id}" style="width:auto">
             ${[['auto', '自动'], ['openai', 'OpenAI'], ['anthropic', 'Anthropic']].map(([v, l]) => `<option value="${v}" ${s.protocol === v ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
         </dd>
-        <dt>模型</dt><dd>${s.models?.length ? `已选 <b>${sel.length}</b> / 共 ${s.models.length}` : '<span class="faint">未拉取</span>'}</dd>
+        <dt>模型</dt><dd>${s.models?.length ? `已选 <b>${sel.length}</b> <span class="faint">/ 共 ${s.models.length}</span>` : '<span class="faint">未拉取</span>'}</dd>
       </dl>
       ${sel.length ? `<div class="chips">${chips}</div>` : ''}
-      ${s.detectError ? `<div class="err-line">${esc(s.detectError)}</div>` : ''}
+      ${s.detectError ? `<div class="err-line">${icon('x', 14)}<span>${esc(s.detectError)}</span></div>` : ''}
       ${lastResultTemplate(s)}
       <div class="foot">
-        <button class="btn sm primary" data-act="run-one" data-id="${s.id}" ${s.apiKey && sel.length ? '' : 'disabled'} title="${sel.length ? '只测试这个站点已勾选的模型' : '先勾选模型'}">测试</button>
-        <button class="btn sm" data-act="check" data-id="${s.id}" ${checking ? 'disabled' : ''}>检测</button>
-        <button class="btn sm" data-act="pick" data-id="${s.id}" ${s.models?.length ? '' : 'disabled'}>选择模型</button>
+        <button class="btn sm primary has-ic" data-act="run-one" data-id="${s.id}" ${s.apiKey && sel.length ? '' : 'disabled'} title="${sel.length ? '只测试这个站点已勾选的模型' : '先勾选模型'}" data-magnet="0.2">测试<span class="btn-ic">${icon('play', 11)}</span></button>
+        <button class="btn sm" data-act="check" data-id="${s.id}" ${checking ? 'disabled' : ''}>${icon('scan', 14)}检测</button>
+        <button class="btn sm" data-act="pick" data-id="${s.id}" ${s.models?.length ? '' : 'disabled'}>${icon('list', 14)}选择模型</button>
         <span style="flex:1"></span>
-        ${s.checkedAt ? `<span class="faint" style="font-size:12px;align-self:center">${esc(fmtTime(s.checkedAt))}</span>` : ''}
-        <button class="btn sm ghost danger" data-act="remove" data-id="${s.id}">删除</button>
+        <button class="btn sm ghost danger" data-act="remove" data-id="${s.id}" aria-label="删除站点" title="删除站点">${icon('trash', 15)}</button>
       </div>
-    </div>`;
+    </article>`;
 }
 
 /** 卡片上的最近一次测试结果：每个模型一行。 */
@@ -160,45 +191,54 @@ function lastResultTemplate(s) {
   const lr = s.lastResult;
   if (!lr?.models || !Object.keys(lr.models).length) {
     return s.models?.length
-      ? '<div class="notice info" style="font-size:12.5px">还没测过：点下方「测试」开始，测完这里会显示得分、成功率、首字延迟和报错。</div>'
+      ? `<div class="notice info">${icon('bolt', 15)}<span>还没测过：点下方「测试」开始，测完这里会显示得分、成功率、首字延迟和报错。</span></div>`
       : '';
   }
   const rows = Object.entries(lr.models).sort((a, b) => b[1].final - a[1].final).map(([m, r]) => {
     const errs = (r.errors || []).map(([k, v]) => `${ERROR_LABELS[k] || k}×${v}`).join(' ');
-    return `<tr title="${esc(r.verdict || '')}">
-      <td class="mono ellipsis" style="max-width:130px">${esc(m)}</td>
-      <td class="num"><b style="color:${scoreColor(r.final)}">${r.final}</b>${r.ai != null ? '<span class="faint" style="font-size:11px"> AI</span>' : ''}</td>
-      <td class="num">${fmtPct(r.successRate, 0)}</td>
-      <td class="num">${fmtMs(r.ttftP50)}</td>
-      <td class="num">${fmtNum(r.tpsP50, 0)}</td>
-      <td>${errs ? `<span style="color:var(--bad)">${esc(errs)}</span>` : '<span class="faint">无</span>'}</td>
-    </tr>`;
+    return `<div class="res-row" title="${esc(r.verdict || '')}">
+      <div class="res-model mono">${esc(m)}</div>
+      <div class="res-score" style="color:${scoreColor(r.final)}">${r.final}<span class="grade ${esc(r.grade || '-')}">${esc(r.grade || '-')}</span></div>
+      <div class="res-metrics">
+        <span>成功 <b>${fmtPct(r.successRate, 0)}</b></span><span>首字 <b>${fmtMs(r.ttftP50)}</b></span><span><b>${fmtNum(r.tpsP50, 0)}</b> t/s</span>${r.ai != null ? '<span class="badge accent" style="height:18px;font-size:11px">AI</span>' : ''}
+        ${errs ? `<span class="res-err">${esc(errs)}</span>` : '<span class="faint">无报错</span>'}
+      </div>
+    </div>`;
   }).join('');
-  return `<div>
-    <div class="section-title" style="display:flex;justify-content:space-between">
+  return `<div class="result-box">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
       <span>最近测试 ${lr.aborted ? '<span class="badge warn">中途停止</span>' : ''}</span>
-      <a href="#report" data-act="open-report" data-run="${esc(lr.runId)}" class="faint" style="font-weight:400;font-size:12px">${esc(fmtTime(lr.at))} · 查看报告</a>
+      <a href="#report" data-act="open-report" data-run="${esc(lr.runId)}" style="font-weight:500;font-size:12px;display:inline-flex;gap:4px;align-items:center">${esc(fmtTime(lr.at))}${icon('arrow', 12)}</a>
     </div>
-    <div class="table-wrap"><table class="tbl mini">
-      <thead><tr><th>模型</th><th class="num">得分</th><th class="num">成功率</th><th class="num">首字</th><th class="num">TPS</th><th>报错</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
+    <div class="res-list">${rows}</div>
   </div>`;
+}
+
+function togglePanel(name) {
+  ui.panel = ui.panel === name ? '' : name;
+  for (const n of ['add', 'bulk']) {
+    const f = $(`#${n}-form`, rootRef);
+    const show = ui.panel === n;
+    const wasHidden = f.classList.contains('hidden');
+    f.classList.toggle('hidden', !show);
+    if (show && wasHidden) {
+      f.setAttribute('data-reveal', '');
+      enterPart(f);
+      f.removeAttribute('data-reveal');
+    }
+  }
+  if (ui.panel) $(`#${ui.panel}-form input, #${ui.panel}-form textarea`, rootRef)?.focus();
 }
 
 async function onClick(e) {
   if (await handlePresetClick(e)) return undefined;
   const btn = e.target.closest('[data-act]');
-  if (!btn) return;
+  if (!btn) return undefined;
   const act = btn.dataset.act;
   const site = state.sites.find((s) => s.id === btn.dataset.id);
   if (act === 'toggle-add' || act === 'toggle-bulk') {
     e.preventDefault();
-    const name = act === 'toggle-add' ? 'add' : 'bulk';
-    ui.panel = ui.panel === name ? '' : name;
-    $('#add-form', rootRef).classList.toggle('hidden', ui.panel !== 'add');
-    $('#bulk-form', rootRef).classList.toggle('hidden', ui.panel !== 'bulk');
-    if (ui.panel) $(`#${name}-form input, #${name}-form textarea`, rootRef)?.focus();
+    togglePanel(act === 'toggle-add' ? 'add' : 'bulk');
   } else if (act === 'check-all') {
     const targets = state.sites.filter((s) => s.apiKey);
     if (!targets.length) return toast('没有可检测的站点（缺少 Key）', 'bad');
@@ -276,23 +316,24 @@ function openModelPicker(site) {
   const wrap = document.createElement('div');
   wrap.className = 'modal-backdrop';
   wrap.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal panel" role="dialog" aria-modal="true" aria-label="选择模型">
       <div class="modal-head">
-        <h3>选择模型 · ${esc(site.name)}</h3>
+        <h3>选择模型 <span class="faint" style="font-weight:500">· ${esc(site.name)}</span></h3>
         <div class="actions">
           <input class="input" placeholder="搜索模型…" data-search style="flex:1;min-width:160px">
-          <button class="btn sm" data-m="fav" title="按设置中的常用模型关键字勾选">按常用关键字</button>
+          <button class="btn sm" data-m="fav" title="按设置中的常用模型关键字勾选">${icon('spark', 14)}按常用关键字</button>
           <button class="btn sm" data-m="all">全选可见</button>
-          <button class="btn sm" data-m="none">清空</button>
+          <button class="btn sm ghost" data-m="none">清空</button>
         </div>
       </div>
       <div class="modal-body"><div class="model-list" data-list></div></div>
       <div class="modal-foot">
         <span class="muted" data-count></span>
-        <div class="actions"><button class="btn" data-m="cancel">取消</button><button class="btn primary" data-m="save">保存</button></div>
+        <div class="actions"><button class="btn ghost" data-m="cancel">取消</button><button class="btn primary has-ic" data-m="save">保存${btnIc('check')}</button></div>
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  const modal = wrap.querySelector('.modal');
   const list = wrap.querySelector('[data-list]');
   const search = wrap.querySelector('[data-search]');
   const count = wrap.querySelector('[data-count]');
@@ -301,13 +342,16 @@ function openModelPicker(site) {
     return site.models.filter((m) => !q || m.toLowerCase().includes(q));
   };
   const draw = () => {
-    list.innerHTML = visible().map((m) => `<label class="check"><input type="checkbox" value="${esc(m)}" ${selected.has(m) ? 'checked' : ''}> ${esc(m)}</label>`).join('')
+    list.innerHTML = visible().map((m) => `<label class="check" data-list-item><input type="checkbox" value="${esc(m)}" ${selected.has(m) ? 'checked' : ''}> ${esc(m)}</label>`).join('')
       || '<div class="muted">没有匹配的模型</div>';
     count.textContent = `已选 ${selected.size} 个`;
   };
+  let closing = false;
   const close = () => {
-    wrap.remove();
+    if (closing) return;
+    closing = true;
     document.removeEventListener('keydown', onKey);
+    modalOut(wrap, modal, () => wrap.remove());
   };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
@@ -333,5 +377,6 @@ function openModelPicker(site) {
     return undefined;
   };
   draw();
+  modalIn(wrap, modal);
   search.focus();
 }

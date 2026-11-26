@@ -4,6 +4,7 @@ import { completeOnce } from '../core/client.js';
 import { listModels, normalizeBaseUrl } from '../core/relay.js';
 import { DEFAULT_SETTINGS } from '../core/runner.js';
 import { esc, toast, $ } from './dom.js';
+import { icon } from './icons.js';
 
 let rootRef = null;
 let customModels = [];
@@ -12,12 +13,12 @@ export function render(root) {
   rootRef = root;
   const s = state.settings;
   root.innerHTML = `
-    <div class="page-head"><div><h1>设置</h1><p>修改后自动保存在本机浏览器。</p></div></div>
+    <div class="page-head"><div><div class="eyebrow">05 · Settings</div><h1 data-split>设置</h1><p>修改后自动保存在本机浏览器。</p></div></div>
 
-    <form class="panel panel-pad" id="judge-form" autocomplete="off"></form>
+    <form class="panel panel-pad spotlight" id="judge-form" autocomplete="off" data-reveal></form>
 
-    <form class="panel panel-pad" id="settings-form" style="margin-top:16px" autocomplete="off">
-      <h2>测试参数</h2>
+    <form class="panel panel-pad" id="settings-form" style="margin-top:26px" autocomplete="off" data-reveal>
+      <h2>${icon('settings', 16)}测试参数</h2>
       <div class="grid c3">
         <label class="field"><span>每个模型的稳定性请求数</span><input class="input" type="number" min="1" max="200" name="requestsPerModel" value="${s.requestsPerModel}"><small>越多越准，也越费额度</small></label>
         <label class="field"><span>每站并发</span><input class="input" type="number" min="1" max="6" name="concurrencyPerSite" value="${s.concurrencyPerSite}"><small>同一站点同时在途的请求数</small></label>
@@ -38,6 +39,12 @@ export function render(root) {
         </label>
       </div>
       <div class="actions" style="margin-top:14px"><button type="button" class="btn ghost" data-act="reset">恢复默认参数</button></div>
+    </form>
+
+    <form class="panel panel-pad" id="ui-form" style="margin-top:26px" autocomplete="off" data-reveal>
+      <h2>${icon('spark', 16)}界面</h2>
+      <label class="check"><input type="checkbox" name="motion" ${s.motion !== false ? 'checked' : ''}> 启用界面动效（GSAP 动画、点阵背景、光斑与点击火花）</label>
+      <p class="faint" style="margin:8px 0 0;font-size:12.5px">测试运行期间会自动暂停持续性动画，避免影响首字延迟的测量；系统开启「减少动态效果」时也会自动关闭。</p>
     </form>`;
 
   root.onchange = onChange;
@@ -75,7 +82,7 @@ function drawJudge() {
   const protoOptions = [['auto', '自动（claude 走 messages）'], ['openai', 'OpenAI chat/completions'], ['anthropic', 'Anthropic messages']]
     .map(([v, l]) => `<option value="${v}" ${j.protocol === v ? 'selected' : ''}>${l}</option>`).join('');
   f.innerHTML = `
-    <h2>AI 评审</h2>
+    <h2>${icon('spark', 16)}AI 评审</h2>
     <p class="muted" style="margin:-4px 0 14px">每个站点×模型测完后，把成功率、错误、速度数据和质量题回答交给评审模型，给出 0–100 分、一句话结论、优缺点和建议，最后再生成一段综合点评。建议用强模型（Claude Sonnet / GPT-5 级别）。</p>
     <label class="check" style="margin-bottom:14px"><input type="checkbox" name="enabled" ${j.enabled ? 'checked' : ''}> 启用 AI 评审</label>
     <div class="${j.enabled ? '' : 'hidden'}">
@@ -113,7 +120,7 @@ function drawJudge() {
       </div>
       <div class="actions" style="margin-top:14px;align-items:flex-start;gap:12px;flex-wrap:nowrap">
         <div style="flex:1" data-judge-status>${judgeStatusLine()}</div>
-        <button type="button" class="btn" data-act="test-judge">测试评审连接</button>
+        <button type="button" class="btn has-ic" data-act="test-judge">测试评审连接<span class="btn-ic">${icon('bolt', 13)}</span></button>
       </div>
       <div data-judge-msg style="margin-top:10px"></div>
     </div>`;
@@ -154,6 +161,8 @@ async function onChange(e) {
       const st = $('[data-judge-status]', rootRef);
       if (st) st.innerHTML = judgeStatusLine();
     }
+  } else if (form.id === 'ui-form') {
+    await saveSettings({ motion: e.target.checked });
   } else if (form.id === 'settings-form') {
     const fd = new FormData(form);
     const d = DEFAULT_SETTINGS;
@@ -196,7 +205,7 @@ async function onClick(e) {
     const msg = $('[data-judge-msg]', rootRef);
     const r0 = resolveJudge();
     if (!r0) return toast('当前没有可用的评审模型', 'bad');
-    msg.innerHTML = `<div class="phase"><span class="spinner"></span> 正在用 ${esc(r0.model)} 测试…</div>`;
+    msg.innerHTML = `<div class="phase"><span class="radar"></span> 正在用 ${esc(r0.model)} 测试…</div>`;
     const t0 = performance.now();
     const r = await completeOnce({ ...r0, prompt: '请只回复 JSON：{"score": 100}', timeoutMs: 60000 });
     const ms = Math.round(performance.now() - t0);

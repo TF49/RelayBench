@@ -2,6 +2,7 @@
 import { state, loadRun, deleteRun } from '../state.js';
 import { esc, fmtTime, fmtDuration, scoreColor, confirmBox, toast } from './dom.js';
 import { showRun } from './report.js';
+import { icon } from './icons.js';
 
 let rootRef = null;
 
@@ -20,12 +21,12 @@ export function onState(what) {
 function draw() {
   const runs = state.runs;
   rootRef.innerHTML = `
-    <div class="page-head"><div><h1>历史</h1><p>测试记录保存在本机浏览器（IndexedDB），不包含任何 Key。</p></div></div>
+    <div class="page-head"><div><div class="eyebrow">04 · History</div><h1 data-split>历史记录</h1><p>每次测试自动保存在本机浏览器（IndexedDB），不包含任何 Key。点击一行打开对应报告。</p></div></div>
     ${runs.length ? `
-    <div class="panel"><div class="table-wrap"><table class="tbl">
+    <section class="panel" data-reveal><div class="table-wrap"><table class="tbl">
       <thead><tr><th>时间</th><th>用时</th><th class="num">站点</th><th class="num">站点×模型</th><th class="num">请求</th><th>最佳</th><th>状态</th><th></th></tr></thead>
       <tbody>${runs.map((r) => `
-        <tr class="clickable" data-open="${esc(r.id)}">
+        <tr class="clickable" data-open="${esc(r.id)}" data-reveal>
           <td>${esc(fmtTime(r.startedAt))}</td>
           <td>${fmtDuration(r.finishedAt - r.startedAt)}</td>
           <td class="num">${r.siteCount}</td>
@@ -33,9 +34,9 @@ function draw() {
           <td class="num">${r.requestCount}</td>
           <td>${r.best ? `<b style="color:${scoreColor(r.best.final)}">${r.best.final}</b> <span class="mono">${esc(r.best.model)}</span> <span class="muted">@ ${esc(r.best.siteName)}</span>` : '—'}</td>
           <td>${r.aborted ? '<span class="badge warn">中途停止</span>' : '<span class="badge ok">完成</span>'} ${r.judged ? '<span class="badge accent">AI 评审</span>' : ''}</td>
-          <td style="text-align:right"><button class="btn sm ghost danger" data-del="${esc(r.id)}">删除</button></td>
+          <td style="text-align:right"><button class="btn sm ghost danger" data-del="${esc(r.id)}" aria-label="删除记录" title="删除记录">${icon('trash', 15)}</button></td>
         </tr>`).join('')}</tbody>
-    </table></div></div>` : '<div class="panel empty"><h3>暂无历史记录</h3><p>每次测试完成后会自动保存在这里。</p></div>'}`;
+    </table></div></section>` : `<div class="panel empty" data-reveal>${icon('history', 28)}<h3 style="margin-top:12px">暂无历史记录</h3><p>每次测试完成后会自动保存在这里。</p></div>`}`;
 }
 
 async function onClick(e) {

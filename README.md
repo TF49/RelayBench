@@ -52,6 +52,16 @@ Windows 可以直接双击 `start.bat`。
 - 浏览器对同一主机最多 6 个并发连接，因此全局并发上限为 6；代理会回传上游耗时（`X-RB-Upstream-Ms`），前端据此扣除本地排队时间。
 - 模型名含 `claude` 时默认走 `/v1/messages`，其他走 `/v1/chat/completions`；可在站点卡片上改协议。
 
+## 界面与动效
+
+高端简洁风格：暖石色中性底 + 单一青绿强调色、Geist 字体、双层边框面板、浮动胶囊导航，自动跟随系统浅色/深色。
+
+动效基于 **GSAP 3.13**（本地 `vendor/gsap/`，含 Flip / SplitText / ScrollTrigger / ScrambleText / DrawSVG / CustomEase），并用原生 JS 移植了 react-bits 的效果：BlurText/SplitText 标题入场、CountUp 数字滚动、DecryptedText 解密文字、SpotlightCard 光斑卡片、Magnet 磁吸按钮、TiltedCard 倾斜卡片、ClickSpark 点击火花、DotGrid 点阵背景、SoftAurora 环境光、AnimatedList 列表入场、PillNav 导航指示器、ShinyText 流光文字、BorderGlow 运行描边、Radar 扫描指示、GlareHover 掠光、Stepper 引导步骤，以及排行榜 Flip 重排和评分环描边动画。
+
+- **不影响计时**：测试运行期间自动暂停持续性动画（环境光、点阵重绘），只保留轻量的 transform/opacity 过渡。
+- 「设置 → 界面」可关闭动效；系统开启「减少动态效果」时自动关闭。
+- 字体与 GSAP 都在本地，离线可用。
+
 ## 隐私
 
 - Key 默认**只在内存里**，刷新页面后需要重新输入；勾选「记住 Key」才会存进本机浏览器 IndexedDB。

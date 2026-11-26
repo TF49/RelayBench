@@ -1,12 +1,14 @@
-// 报告视图：综合点评、余额消耗、排行榜（可排序）、逐项详情、导出。
+// 报告视图：冠军卡、AI 综合点评、余额消耗、排行榜（Flip 排序）、逐项详情、导出。
 import { state, loadRun } from '../state.js';
 import { ERROR_LABELS } from '../core/errors.js';
 import { QUALITY_PROBES } from '../core/probes.js';
 import { topErrors } from '../core/stats.js';
 import { SITE_TYPE_LABELS } from '../core/relay.js';
 import {
-  esc, fmtMs, fmtPct, fmtNum, fmtTime, fmtDuration, fmtBalance, fmtMoney, scoreColor, download,
+  esc, fmtMs, fmtPct, fmtNum, fmtTime, fmtDuration, fmtBalance, fmtMoney, scoreColor, download, $,
 } from './dom.js';
+import { icon } from './icons.js';
+import { flipCapture, flipPlay, expandIn, motionOn } from './motion.js';
 
 const ui = { sort: { key: 'final', dir: -1 }, open: new Set() };
 let rootRef = null;
@@ -27,10 +29,13 @@ export function render(root) {
   root.onsubmit = null;
   root.onchange = null;
   if (!state.viewingRun && state.runs.length) {
-    root.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+    root.innerHTML = '<div class="empty"><span class="radar" style="margin:0 auto"></span></div>';
     loadRun(state.runs[0].id).then((run) => {
       state.viewingRun = run || null;
-      if (rootRef === root && root.isConnected) draw();
+      if (rootRef === root && root.isConnected) {
+        draw();
+        import('./motion.js').then((m) => m.enterView(root));
+      }
     });
     return;
   }
@@ -42,54 +47,102 @@ export function onState(what) {
   if (what === 'runs' || what === 'run') draw();
 }
 
+const ring = (value, size = 92) => `
+  <div class="ring" data-ring="${value}" style="width:${size}px;height:${size}px">
+    <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-bg" cx="18" cy="18" r="15.9155" pathLength="100"/><circle class="ring-val" cx="18" cy="18" r="15.9155" pathLength="100" style="stroke:${scoreColor(value)}"/></svg>
+    <div class="ring-num" data-count="${value}">${value}</div>
+  </div>`;
+
 function draw() {
   const run = state.viewingRun;
   if (!run) {
     rootRef.innerHTML = `
-      <div class="page-head"><div><h1>报告</h1></div></div>
-      <div class="panel empty"><h3>还没有测试报告</h3><p>到 <a href="#run">测试</a> 页开始一次批量测试。</p></div>`;
+      <div class="page-head"><div><div class="eyebrow">03 · Report</div><h1 data-split>测试报告</h1></div></div>
+      <div class="panel empty" data-reveal>${icon('report', 28)}<h3 style="margin-top:12px">还没有测试报告</h3><p>到 <a href="#run">测试</a> 页开始一次批量测试，跑完会自动来到这里。</p></div>`;
     return;
   }
-  const items = sortedItems(run);
   const reqs = run.items.reduce((n, it) => n + it.stats.total, 0);
+  const best = [...run.items].sort((a, b) => b.final - a.final)[0];
   rootRef.innerHTML = `
     <div class="page-head">
       <div>
-        <h1>测试报告 ${run.aborted ? '<span class="badge warn">中途停止</span>' : ''}</h1>
+        <div class="eyebrow">03 · Report</div>
+        <h1 data-split>测试报告</h1>
         <p>${esc(fmtTime(run.startedAt))} · 用时 ${fmtDuration(run.finishedAt - run.startedAt)} · ${run.sites.length} 个站点 · ${run.items.length} 个站点×模型 · ${reqs} 次请求
-          · 每模型 ${run.settings.requestsPerModel} 次${probeCountOf(run) ? ` + ${probeCountOf(run)} 道质量题` : ''}
-          ${run.settings.judgeModel ? ` · 评审 ${esc(run.settings.judgeModel)}` : ''}</p>
+          · 每模型 ${run.settings.requestsPerModel} 次${probeCountOf(run) ? ` + ${probeCountOf(run)} 道质量题` : ''}${run.settings.judgeModel ? ` · 评审 ${esc(run.settings.judgeModel)}` : ''}
+          ${run.aborted ? ' <span class="badge warn">中途停止</span>' : ''}</p>
       </div>
       <div class="actions">
-        <button class="btn" data-act="csv">导出 CSV</button>
-        <button class="btn" data-act="json">导出 JSON</button>
+        <button class="btn" data-act="csv">${icon('download', 15)}导出 CSV</button>
+        <button class="btn" data-act="json">${icon('download', 15)}导出 JSON</button>
       </div>
     </div>
 
     ${aiNotice(run)}
-    ${run.summary ? `<div class="panel panel-pad"><h2>AI 综合点评</h2><div class="summary-text">${esc(run.summary)}</div></div>` : ''}
-    ${run.summaryError ? `<div class="notice bad" style="margin-bottom:16px">综合点评生成失败：${esc(run.summaryError)}</div>` : ''}
 
-    <div class="balance-strip" style="margin-top:16px">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:22px;align-items:stretch">
+      ${best ? `
+      <section class="panel panel-pad spotlight" data-reveal data-tilt>
+        <div class="section-title" style="display:flex;align-items:center;gap:6px">${icon('gauge', 14)}本次最佳</div>
+        <div class="score-head" style="margin:6px 0 0">
+          ${ring(best.final, 104)}
+          <div style="min-width:0">
+            <div class="mono" style="font-size:16px;font-weight:600;color:var(--text);word-break:break-all">${esc(best.model)}</div>
+            <div class="muted" style="margin:2px 0 10px">${esc(best.siteName)}</div>
+            <div class="actions" style="gap:6px">
+              <span class="grade ${esc(best.grade)}" data-scramble>${esc(best.grade)}</span>
+              <span class="badge ok">成功率 ${fmtPct(best.stats.successRate, 0)}</span>
+              <span class="badge">首字 ${fmtMs(best.stats.ttft.p50)}</span>
+            </div>
+          </div>
+        </div>
+        ${best.ai?.verdict ? `<div class="verdict" style="margin:18px 0 0">“${esc(best.ai.verdict)}”</div>` : ''}
+      </section>` : ''}
+      ${run.summary ? `
+      <section class="panel panel-pad spotlight" data-reveal>
+        <div class="summary">
+          <div class="summary-ic">${icon('spark', 24)}</div>
+          <div><h2 style="margin-bottom:6px">AI 综合点评</h2><div class="summary-text">${esc(run.summary)}</div></div>
+        </div>
+      </section>` : ''}
+    </div>
+    ${run.summaryError ? `<div class="notice bad" style="margin-top:16px">${icon('x', 15)}<span>综合点评生成失败：${esc(run.summaryError)}</span></div>` : ''}
+
+    <div class="balance-strip" style="margin-top:26px">
       ${run.sites.map((s) => `
-        <div class="panel balance-card">
-          <div class="t">${esc(s.name)} <span class="badge" style="margin-left:4px">${esc(SITE_TYPE_LABELS[s.type] || s.type)}</span></div>
-          <div class="muted" style="font-size:12.5px">余额 ${esc(fmtBalance(s.balanceBefore))} → ${esc(fmtBalance(s.balanceAfter))}</div>
-          <div style="font-size:13px;margin-top:2px">本次消耗 <b>${s.cost == null ? '—' : esc(fmtMoney(s.cost, s.balanceAfter?.unit || 'USD'))}</b></div>
-        </div>`).join('')}
+        <article class="panel balance-card spotlight glare" data-reveal>
+          <div class="t">${icon('wallet', 15)}${esc(s.name)} <span class="badge">${esc(SITE_TYPE_LABELS[s.type] || s.type)}</span></div>
+          <div class="muted" style="font-size:12px">本次消耗</div>
+          <div class="cost" ${s.cost != null ? `data-count="${s.cost}" data-format="money"` : ''}>${s.cost == null ? '—' : esc(fmtMoney(s.cost, s.balanceAfter?.unit || 'USD'))}</div>
+          <div class="faint" style="font-size:12px;margin-top:6px">余额 ${esc(fmtBalance(s.balanceBefore))} → ${esc(fmtBalance(s.balanceAfter))}</div>
+        </article>`).join('')}
     </div>
 
-    <div class="panel section" style="margin-top:16px">
+    <section class="panel" style="margin-top:26px" data-reveal>
+      <div class="panel-pad" style="padding-bottom:4px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <h2 style="margin:0">${icon('layers', 16)}排行榜</h2>
+        <span class="faint" style="font-size:12px">点击表头排序，点击行展开详情</span>
+      </div>
       <div class="table-wrap"><table class="tbl">
-        <thead><tr>
-          <th>#</th><th>站点 / 模型</th>
-          ${COLS.map((c) => `<th class="num sortable" data-sort="${c.key}">${c.label}${ui.sort.key === c.key ? `<span class="arrow">${ui.sort.dir < 0 ? '▼' : '▲'}</span>` : ''}</th>`).join('')}
-          <th>主要错误</th><th>AI 结论</th>
-        </tr></thead>
-        <tbody>${items.map((it, i) => rowTemplate(it, i, run)).join('')}</tbody>
+        <thead data-head>${headTemplate()}</thead>
+        <tbody data-board>${boardTemplate(run)}</tbody>
       </table></div>
-    </div>
-    <p class="faint" style="font-size:12px;margin-top:10px">规则分 = 可用性 45 + 速度 25 + 稳定性 15 + 质量 15；综合分 = 规则分 × ${fmtNum(1 - run.settings.aiWeight, 1)} + AI 分 × ${fmtNum(run.settings.aiWeight, 1)}（无 AI 分时等于规则分）。点击行查看详情。</p>`;
+    </section>
+    <p class="faint" style="font-size:12px;margin-top:14px">规则分 = 可用性 45 + 速度 25 + 稳定性 15 + 质量 15；综合分 = 规则分 × ${fmtNum(1 - run.settings.aiWeight, 1)} + AI 分 × ${fmtNum(run.settings.aiWeight, 1)}（无 AI 分时等于规则分）。</p>`;
+  // 首屏：展开的详情需要直接显示最终状态
+  rootRef.querySelectorAll('.detail').forEach(animateDetailBars);
+}
+
+function headTemplate() {
+  return `<tr>
+    <th>#</th><th>站点 / 模型</th>
+    ${COLS.map((c) => `<th class="num sortable ${ui.sort.key === c.key ? 'sorted' : ''}" data-sort="${c.key}">${c.label}${ui.sort.key === c.key ? `<span class="arrow">${ui.sort.dir < 0 ? '▼' : '▲'}</span>` : ''}</th>`).join('')}
+    <th>主要错误</th><th>AI 结论</th>
+  </tr>`;
+}
+
+function boardTemplate(run) {
+  return sortedItems(run).map((it, i) => rowTemplate(it, i)).join('');
 }
 
 function probeCountOf(run) {
@@ -98,16 +151,17 @@ function probeCountOf(run) {
 }
 
 function aiNotice(run) {
+  const wrap = (cls, text) => `<div class="notice ${cls}" style="margin-bottom:22px">${icon('spark', 15)}<span>${text}</span></div>`;
   if (!run.settings.judgeModel) {
-    return `<div class="notice" style="margin-bottom:16px">本次没有进行 AI 评审，只有规则分${run.aborted ? '（测试中途停止时不做评审）' : ''}。可在 <a href="#settings">设置</a> 中启用后重新测试。</div>`;
+    return wrap('', `本次没有进行 AI 评审，只有规则分${run.aborted ? '（测试中途停止时不做评审）' : ''}。可在 <a href="#settings">设置</a> 中启用后重新测试。`);
   }
   const judged = run.items.filter((it) => it.stats.total > 0);
   const failed = judged.filter((it) => !it.ai);
   if (judged.length && failed.length === judged.length) {
-    return `<div class="notice bad" style="margin-bottom:16px">AI 评审全部失败（评审模型 ${esc(run.settings.judgeModel)}）：${esc(failed[0].aiError || '未知错误')}。请到 <a href="#settings">设置</a> 点「测试评审连接」排查。</div>`;
+    return wrap('bad', `AI 评审全部失败（评审模型 ${esc(run.settings.judgeModel)}）：${esc(failed[0].aiError || '未知错误')}。请到 <a href="#settings">设置</a> 点「测试评审连接」排查。`);
   }
   if (failed.length) {
-    return `<div class="notice" style="margin-bottom:16px">${failed.length} 项 AI 评审失败，这些项只用规则分。原因示例：${esc(failed[0].aiError || '')}</div>`;
+    return wrap('', `${failed.length} 项 AI 评审失败，这些项只用规则分。原因示例：${esc(failed[0].aiError || '')}`);
   }
   return '';
 }
@@ -117,17 +171,17 @@ function sortedItems(run) {
   return [...run.items].sort((a, b) => (col.get(a) - col.get(b)) * ui.sort.dir);
 }
 
-function rowTemplate(it, i, run) {
+function rowTemplate(it, i) {
   const open = ui.open.has(it.key);
   const errs = topErrors(it.stats.errors).map(([k, v]) => `<span class="badge bad">${esc(ERROR_LABELS[k] || k)} ×${v}</span>`).join(' ');
   const s = it.stats;
   return `
-    <tr class="clickable ${open ? 'open' : ''}" data-row="${esc(it.key)}">
-      <td class="num muted">${i + 1}</td>
+    <tr class="clickable ${open ? 'open' : ''}" data-row="${esc(it.key)}" data-flip-id="${esc(it.key)}" aria-expanded="${open}">
+      <td><span class="rank ${i < 3 ? 'top' : ''}">${String(i + 1).padStart(2, '0')}</span></td>
       <td><div class="cell-main mono" style="font-size:13px">${esc(it.model)}</div><div class="cell-sub">${esc(it.siteName)}</div></td>
-      <td class="num"><span class="score-cell" style="color:${scoreColor(it.final)}">${it.final}<span class="grade ${esc(it.grade)}">${esc(it.grade)}</span></span></td>
+      <td class="num"><span class="score-cell" style="color:${scoreColor(it.final)}"><span data-count="${it.final}">${it.final}</span><span class="grade ${esc(it.grade)}">${esc(it.grade)}</span></span></td>
       <td class="num">${it.rule.total}</td>
-      <td class="num">${it.ai ? it.ai.score : `<span class="faint" title="${esc(it.aiError)}">—</span>`}</td>
+      <td class="num">${it.ai ? `<b>${it.ai.score}</b>` : `<span class="faint" title="${esc(it.aiError)}">—</span>`}</td>
       <td class="num">${fmtPct(s.successRate)} <span class="faint">${s.success}/${s.total}</span></td>
       <td class="num">${fmtMs(s.ttft.p50)}</td>
       <td class="num">${fmtMs(s.ttft.p95)}</td>
@@ -135,7 +189,7 @@ function rowTemplate(it, i, run) {
       <td>${errs || '<span class="faint">—</span>'}</td>
       <td><div class="ellipsis" title="${esc(it.ai?.verdict || it.aiError)}">${esc(it.ai?.verdict || '')}</div></td>
     </tr>
-    ${open ? `<tr><td colspan="${COLS.length + 4}" class="detail-cell">${detailTemplate(it, run)}</td></tr>` : ''}`;
+    ${open ? `<tr data-detail="${esc(it.key)}" data-flip-id="d-${esc(it.key)}"><td colspan="${COLS.length + 4}" class="detail-cell">${detailTemplate(it)}</td></tr>` : ''}`;
 }
 
 function detailTemplate(it) {
@@ -148,12 +202,15 @@ function detailTemplate(it) {
   ];
   const fails = it.records.filter((r) => !r.ok);
   return `<div class="detail">
-    <div class="panel panel-pad">
-      <h2>规则分构成 <span class="muted" style="font-weight:400">${it.rule.total} / 100</span></h2>
-      <div class="parts">${parts.map(([n, v, max]) => `
-        <div class="part"><span class="muted">${n}</span><div class="bar"><div style="width:${(v / max) * 100}%"></div></div><span class="num">${fmtNum(v)} / ${max}</span></div>`).join('')}
+    <section class="panel panel-pad" data-reveal>
+      <h2>${icon('gauge', 16)}规则分构成</h2>
+      <div class="score-head">
+        ${ring(it.rule.total)}
+        <div class="parts">${parts.map(([n, v, max]) => `
+          <div class="part"><span class="muted">${n}</span><div class="bar"><div style="--p:${v / max}"></div></div><span class="num">${fmtNum(v)} <span class="faint">/ ${max}</span></span></div>`).join('')}
+        </div>
       </div>
-      <div class="grid c3" style="margin-top:16px;font-size:13px">
+      <div class="metric-grid">
         <div><div class="muted">首字 P50 / P95</div><b>${fmtMs(s.ttft.p50)} / ${fmtMs(s.ttft.p95)}</b></div>
         <div><div class="muted">总耗时 P50 / P95</div><b>${fmtMs(s.latency.p50)} / ${fmtMs(s.latency.p95)}</b></div>
         <div><div class="muted">首字抖动 CV</div><b>${fmtNum(s.ttftCv, 2)}</b></div>
@@ -161,37 +218,37 @@ function detailTemplate(it) {
         <div><div class="muted">TPS P50 / 平均</div><b>${fmtNum(s.tps.p50)} / ${fmtNum(s.tps.avg)}</b></div>
         <div><div class="muted">流式响应占比</div><b>${fmtPct(s.streamedRatio, 0)}</b></div>
       </div>
-    </div>
+    </section>
 
-    <div class="panel panel-pad">
-      <h2>AI 评审 ${it.ai ? `<span class="badge accent">${it.ai.score} 分</span>${it.ai.qualityScore != null ? ` <span class="badge">质量 ${it.ai.qualityScore}</span>` : ''}` : ''}</h2>
+    <section class="panel panel-pad spotlight" data-reveal>
+      <h2>${icon('spark', 16)}AI 评审 ${it.ai ? `<span class="badge accent">${it.ai.score} 分</span>${it.ai.qualityScore != null ? ` <span class="badge">质量 ${it.ai.qualityScore}</span>` : ''}` : ''}</h2>
       ${it.ai ? `
-        <div style="font-weight:600;margin-bottom:8px">${esc(it.ai.verdict)}</div>
+        <div class="verdict">${esc(it.ai.verdict)}</div>
         ${it.ai.strengths.length ? `<div class="muted" style="font-size:12.5px">优点</div><ul class="list">${it.ai.strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-        ${it.ai.issues.length ? `<div class="muted" style="font-size:12.5px;margin-top:8px">问题</div><ul class="list">${it.ai.issues.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
-        ${it.ai.suggestion ? `<div class="notice info" style="margin-top:10px">${esc(it.ai.suggestion)}</div>` : ''}`
+        ${it.ai.issues.length ? `<div class="muted" style="font-size:12.5px;margin-top:10px">问题</div><ul class="list">${it.ai.issues.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${it.ai.suggestion ? `<div class="notice info" style="margin-top:14px">${icon('bolt', 15)}<span>${esc(it.ai.suggestion)}</span></div>` : ''}`
         : `<div class="muted">${it.aiError ? `评审失败：${esc(it.aiError)}` : '本次未启用 AI 评审'}</div>`}
-    </div>
+    </section>
 
-    <div class="panel panel-pad">
-      <h2>请求时间线</h2>
+    <section class="panel panel-pad" data-reveal>
+      <h2>${icon('history', 16)}请求时间线</h2>
       ${waterfall(it.records)}
-      <div class="legend"><span><i style="background:color-mix(in srgb, var(--accent) 35%, transparent)"></i>等待首字</span><span><i style="background:var(--accent)"></i>生成</span><span><i style="background:var(--bad)"></i>失败</span></div>
-    </div>
+      <div class="legend"><span><i style="background:color-mix(in srgb, var(--accent) 28%, transparent)"></i>等待首字</span><span><i style="background:var(--accent)"></i>生成</span><span><i style="background:var(--bad)"></i>失败</span></div>
+    </section>
 
-    <div class="panel panel-pad">
-      <h2>错误 ${fails.length ? `<span class="badge bad">${fails.length}</span>` : ''}</h2>
+    <section class="panel panel-pad" data-reveal>
+      <h2>${icon('x', 16)}错误 ${fails.length ? `<span class="badge bad">${fails.length}</span>` : ''}</h2>
       ${fails.length ? `
         <div class="err-chips">${Object.entries(s.errors).map(([k, v]) => `<span class="badge bad">${esc(ERROR_LABELS[k] || k)} ×${v}</span>`).join('')}</div>
-        <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
           ${fails.slice(0, 6).map((r) => `<div class="mono" style="font-size:12px;word-break:break-all"><span class="badge bad">${esc(r.errorLabel)}${r.status ? ` ${r.status}` : ''}</span> ${esc(r.errorMessage)}${r.requestId ? ` <span class="faint">[${esc(r.requestId)}]</span>` : ''}</div>`).join('')}
           ${fails.length > 6 ? `<div class="faint">… 另有 ${fails.length - 6} 条</div>` : ''}
-        </div>` : '<div class="muted">没有错误 🎉</div>'}
-    </div>
+        </div>` : `<div class="notice info">${icon('check', 15)}<span>这一项没有任何报错</span></div>`}
+    </section>
 
     ${QUALITY_PROBES.some((p) => it.records.find((r) => r.probeId === p.id)) ? `
-    <div class="panel panel-pad full">
-      <h2>质量题 <span class="muted" style="font-weight:400">${s.probesPassed} / ${s.probesTotal} 通过</span></h2>
+    <section class="panel panel-pad full" data-reveal>
+      <h2>${icon('check', 16)}质量题 <span class="faint" style="font-weight:400">${s.probesPassed} / ${s.probesTotal} 通过</span></h2>
       ${QUALITY_PROBES.map((p) => {
         const r = it.records.find((x) => x.probeId === p.id);
         if (!r) return '';
@@ -202,14 +259,14 @@ function detailTemplate(it) {
           <pre>${r.ok ? esc(r.text) : `请求失败：${esc(r.errorLabel)} ${esc(r.errorMessage)}`}</pre>
         </div>`;
       }).join('')}
-    </div>` : ''}
+    </section>` : ''}
 
-    <div class="panel panel-pad full">
+    <section class="panel panel-pad full" data-reveal>
       <details class="records"><summary>全部请求明细（${it.records.length} 条）</summary>
-        <div class="table-wrap" style="margin-top:10px"><table class="tbl">
+        <div class="table-wrap" style="margin-top:12px"><table class="tbl">
           <thead><tr><th>#</th><th>类型</th><th>结果</th><th class="num">首字</th><th class="num">总耗时</th><th class="num">输出 tokens</th><th class="num">TPS</th><th>回答 / 错误</th></tr></thead>
           <tbody>${it.records.map((r, i) => `<tr>
-            <td class="num muted">${i + 1}</td>
+            <td class="num faint">${i + 1}</td>
             <td>${r.kind === 'probe' ? '质量题' : '稳定性'}</td>
             <td>${r.ok ? `<span class="badge ok">${r.status || 'OK'}</span>` : `<span class="badge bad">${esc(r.errorLabel)}${r.status ? ` ${r.status}` : ''}</span>`}${r.ok && !r.streamed ? ' <span class="badge warn">非流式</span>' : ''}</td>
             <td class="num">${fmtMs(r.ttftMs)}</td>
@@ -220,7 +277,7 @@ function detailTemplate(it) {
           </tr>`).join('')}</tbody>
         </table></div>
       </details>
-    </div>
+    </section>
   </div>`;
 }
 
@@ -236,8 +293,35 @@ function waterfall(records) {
       const ttft = Math.min(r.ttftMs ?? total, total);
       bars = `<div class="wf-ttft" style="left:0;width:${(ttft / max) * 100}%"></div><div class="wf-gen" style="left:${(ttft / max) * 100}%;width:${Math.max(0.5, ((total - ttft) / max) * 100)}%"></div>`;
     }
-    return `<div class="wf-row" title="${r.ok ? `首字 ${fmtMs(r.ttftMs)} · 总 ${fmtMs(r.totalMs)}` : esc(`${r.errorLabel}：${r.errorMessage}`)}"><span class="num">${i + 1}</span><div class="wf-track">${bars}</div><span class="num">${r.ok ? fmtMs(total) : esc(r.errorLabel)}</span></div>`;
+    return `<div class="wf-row" title="${r.ok ? `首字 ${fmtMs(r.ttftMs)} · 总 ${fmtMs(r.totalMs)}` : esc(`${r.errorLabel}：${r.errorMessage}`)}"><span>${String(i + 1).padStart(2, '0')}</span><div class="wf-track"><div class="wf-bars">${bars}</div></div><span>${r.ok ? fmtMs(total) : esc(r.errorLabel)}</span></div>`;
   }).join('')}</div>`;
+}
+
+/** 详情里的分项条与时间线：从 0 生长到实际值。 */
+function animateDetailBars(detail) {
+  const gsap = window.gsap;
+  if (!detail || !gsap || !motionOn()) return;
+  gsap.from(detail.querySelectorAll('.bar > div'), { scaleX: 0, duration: 1.1, stagger: 0.08, delay: 0.15, ease: 'premium' });
+  gsap.from(detail.querySelectorAll('.wf-bars'), { scaleX: 0, duration: 0.9, stagger: 0.025, delay: 0.2, ease: 'premium' });
+}
+
+/** 只重画排行榜（排序 / 展开），用 Flip 让行平滑换位。 */
+function redrawBoard(expandedKey) {
+  const run = state.viewingRun;
+  const tbody = $('[data-board]', rootRef);
+  const thead = $('[data-head]', rootRef);
+  if (!tbody) return;
+  const flipState = flipCapture(tbody.querySelectorAll('tr[data-flip-id]'));
+  thead.innerHTML = headTemplate();
+  tbody.innerHTML = boardTemplate(run);
+  flipPlay(flipState, tbody.querySelectorAll('tr[data-flip-id]'));
+  if (expandedKey) {
+    const detail = tbody.querySelector(`[data-detail="${CSS.escape(expandedKey)}"]`);
+    if (detail) {
+      expandIn(detail);
+      animateDetailBars(detail);
+    }
+  }
 }
 
 function onClick(e) {
@@ -249,15 +333,16 @@ function onClick(e) {
     const col = COLS.find((c) => c.key === key);
     if (ui.sort.key === key) ui.sort.dir *= -1;
     else ui.sort = { key, dir: col?.asc ? 1 : -1 };
-    draw();
+    redrawBoard();
     return;
   }
   const row = e.target.closest('[data-row]');
   if (row) {
     const k = row.dataset.row;
-    if (ui.open.has(k)) ui.open.delete(k);
-    else ui.open.add(k);
-    draw();
+    const opening = !ui.open.has(k);
+    if (opening) ui.open.add(k);
+    else ui.open.delete(k);
+    redrawBoard(opening ? k : null);
     return;
   }
   const act = e.target.closest('[data-act]')?.dataset.act;
@@ -289,7 +374,10 @@ export function toCsv(run) {
 export function showRun(run) {
   state.viewingRun = run;
   ui.open.clear();
-  location.hash = '#report';
-  if (rootRef?.isConnected) draw();
+  if (location.hash === '#report' && rootRef?.isConnected) {
+    draw();
+    import('./motion.js').then((m) => m.enterView(rootRef));
+  } else {
+    location.hash = '#report';
+  }
 }
-

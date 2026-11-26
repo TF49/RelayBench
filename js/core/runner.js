@@ -72,6 +72,7 @@ export const DEFAULT_SETTINGS = {
   ttftTimeoutSec: 30,
   totalTimeoutSec: 120,
   aiWeight: 0.4,
+  motion: true,
   favoriteKeywords: ['claude-sonnet-4', 'claude-opus-4', 'gpt-5', 'gemini-2.5-pro', 'deepseek'],
 };
 

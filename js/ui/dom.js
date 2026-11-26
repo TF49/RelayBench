@@ -1,17 +1,23 @@
 // DOM 与格式化小工具。
+import { icon } from './icons.js';
+import { toastIn, toastOut } from './motion.js';
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-export function toast(msg, type = 'info', ms = 3200) {
+export function toast(msg, type = 'info', ms = 3400) {
   const box = document.getElementById('toasts');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = msg;
+  el.setAttribute('role', type === 'bad' ? 'alert' : 'status');
+  const ic = type === 'bad' ? 'x' : type === 'ok' ? 'check' : 'spark';
+  el.innerHTML = `<span class="t-ic">${icon(ic, 13)}</span><span></span>`;
+  el.lastChild.textContent = msg;
   box.appendChild(el);
-  setTimeout(() => el.remove(), ms);
+  toastIn(el);
+  setTimeout(() => toastOut(el, () => el.remove()), ms);
 }
 
 export const fmtMs = (ms) => {
