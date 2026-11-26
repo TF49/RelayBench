@@ -66,6 +66,7 @@ function draw() {
       </div>
     </div>
 
+    ${aiNotice(run)}
     ${run.summary ? `<div class="panel panel-pad"><h2>AI 综合点评</h2><div class="summary-text">${esc(run.summary)}</div></div>` : ''}
     ${run.summaryError ? `<div class="notice bad" style="margin-bottom:16px">综合点评生成失败：${esc(run.summaryError)}</div>` : ''}
 
@@ -89,6 +90,21 @@ function draw() {
       </table></div>
     </div>
     <p class="faint" style="font-size:12px;margin-top:10px">规则分 = 可用性 45 + 速度 25 + 稳定性 15 + 质量 15；综合分 = 规则分 × ${fmtNum(1 - run.settings.aiWeight, 1)} + AI 分 × ${fmtNum(run.settings.aiWeight, 1)}（无 AI 分时等于规则分）。点击行查看详情。</p>`;
+}
+
+function aiNotice(run) {
+  if (!run.settings.judgeModel) {
+    return `<div class="notice" style="margin-bottom:16px">本次没有进行 AI 评审，只有规则分${run.aborted ? '（测试中途停止时不做评审）' : ''}。可在 <a href="#settings">设置</a> 中启用后重新测试。</div>`;
+  }
+  const judged = run.items.filter((it) => it.stats.total > 0);
+  const failed = judged.filter((it) => !it.ai);
+  if (judged.length && failed.length === judged.length) {
+    return `<div class="notice bad" style="margin-bottom:16px">AI 评审全部失败（评审模型 ${esc(run.settings.judgeModel)}）：${esc(failed[0].aiError || '未知错误')}。请到 <a href="#settings">设置</a> 点「测试评审连接」排查。</div>`;
+  }
+  if (failed.length) {
+    return `<div class="notice" style="margin-bottom:16px">${failed.length} 项 AI 评审失败，这些项只用规则分。原因示例：${esc(failed[0].aiError || '')}</div>`;
+  }
+  return '';
 }
 
 function sortedItems(run) {

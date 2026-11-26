@@ -190,6 +190,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl td.detail-cell { padding: 0; background: var(--bg); }
 .cell-main { font-weight: 600; }
 .cell-sub { color: var(--muted); font-size: 12px; }
+table.tbl.mini { font-size: 12px; }
+.tbl.mini th, .tbl.mini td { padding: 5px 6px; }
+.tbl.mini th { background: transparent; }
 .ellipsis { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ------------------------------------------------------------ sites */

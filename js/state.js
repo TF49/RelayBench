@@ -1,13 +1,15 @@
 // 全局状态 + 持久化。Key 只在内存，除非站点/评审勾选「记住 Key」。
 import { db } from './store/db.js';
 import { DEFAULT_SETTINGS, MAX_GLOBAL_CONCURRENCY } from './core/runner.js';
+import { pickJudgeModel } from './core/judge.js';
 
 const listeners = new Set();
 
 export const state = {
   sites: [],          // {id,name,baseUrl,apiKey,rememberKey,protocol,type,balance,models[],selectedModels[],detectError,checkedAt}
   settings: { ...DEFAULT_SETTINGS },
-  judge: { enabled: false, baseUrl: '', apiKey: '', model: '', protocol: 'auto', rememberKey: false },
+  // source: 'site' = 用已添加站点的模型（siteId+model 为空时自动挑选）；'custom' = 单独填写的渠道
+  judge: { enabled: true, source: 'site', siteId: '', model: '', baseUrl: '', apiKey: '', protocol: 'auto', rememberKey: false },
   runs: [],           // 历史摘要（完整记录按需从 IndexedDB 读）
   current: null,      // 正在运行或刚完成的 run 的实时视图
   viewingRun: null,   // 报告页正在看的 run
@@ -42,7 +44,16 @@ export async function loadAll() {
   if (settings) state.settings = { ...DEFAULT_SETTINGS, ...settings };
   state.settings.concurrencyGlobal = Math.min(MAX_GLOBAL_CONCURRENCY, state.settings.concurrencyGlobal);
   state.settings.concurrencyPerSite = Math.min(MAX_GLOBAL_CONCURRENCY, state.settings.concurrencyPerSite);
-  if (judge) state.judge = { ...state.judge, apiKey: '', ...judge };
+  if (judge) {
+    // 旧版本配置没有 source 字段：填过地址+模型的视为自定义，否则改为默认的「自动从站点挑选」并启用
+    const migrated = judge.source ? judge : {
+      ...judge,
+      source: judge.baseUrl && judge.model ? 'custom' : 'site',
+      enabled: judge.baseUrl && judge.model ? judge.enabled : true,
+      model: judge.baseUrl ? judge.model : '',
+    };
+    state.judge = { ...state.judge, apiKey: '', ...migrated };
+  }
   state.runs = (runs || []).map(runSummary).sort((a, b) => b.startedAt - a.startedAt);
 }
 
@@ -98,6 +109,30 @@ export async function saveJudge(patch) {
   const { apiKey, ...rest } = state.judge;
   await db.setKV('judge', state.judge.rememberKey ? { ...rest, apiKey } : rest);
   notify('settings');
+}
+
+/**
+ * 解析出本次实际使用的评审渠道。
+ * @returns {{baseUrl, apiKey, model, protocol, label, auto:boolean}|null} null 表示没有可用评审
+ */
+export function resolveJudge() {
+  const j = state.judge;
+  if (!j.enabled) return null;
+  if (j.source === 'custom') {
+    if (!j.baseUrl || !j.apiKey || !j.model) return null;
+    return { baseUrl: j.baseUrl, apiKey: j.apiKey, model: j.model, protocol: j.protocol, label: j.baseUrl, auto: false };
+  }
+  let site = state.sites.find((s) => s.id === j.siteId && s.apiKey);
+  let model = j.model;
+  let auto = false;
+  if (!site || !model) {
+    const pick = pickJudgeModel(state.sites);
+    if (!pick) return null;
+    site = state.sites.find((s) => s.id === pick.siteId);
+    model = pick.model;
+    auto = true;
+  }
+  return { baseUrl: site.baseUrl, apiKey: site.apiKey, model, protocol: site.protocol, label: site.name, auto };
 }
 
 export function runSummary(run) {

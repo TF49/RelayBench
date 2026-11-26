@@ -6,7 +6,7 @@ import { SSEParser, interpretEvent, newAccumulator, runChat, parseFullResponse, 
 import { normalizeBaseUrl, parseBulkImport, parseNewApiUsage, parseSub2apiUsage, parseBillingUsage, parseModels, preselectModels, balanceDelta, detectSite } from '../js/core/relay.js';
 import { percentile, computeStats } from '../js/core/stats.js';
 import { ruleScore, grade, combineScore, linear } from '../js/core/scoring.js';
-import { parseJudgeResponse, buildJudgePrompt } from '../js/core/judge.js';
+import { parseJudgeResponse, buildJudgePrompt, pickJudgeModel } from '../js/core/judge.js';
 import { QUALITY_PROBES, getProbe } from '../js/core/probes.js';
 import { runBenchmark, Semaphore, planJobs, interleave } from '../js/core/runner.js';
 
@@ -290,6 +290,18 @@ test('parseJudgeResponse 容错', () => {
   assert.equal(parseJudgeResponse('not json'), null);
   assert.equal(parseJudgeResponse('{"score":"abc"}'), null);
   assert.equal(parseJudgeResponse('{"score":150}').score, 100);
+});
+
+test('pickJudgeModel 按偏好挑选，跳过无 Key 站点', () => {
+  const sites = [
+    { id: 'a', apiKey: '', models: ['claude-opus-4-1'] },
+    { id: 'b', apiKey: 'k', models: ['gpt-4o-mini', 'deepseek-chat', 'text-embedding-3-large'] },
+    { id: 'c', apiKey: 'k', models: ['gpt-5', 'claude-sonnet-4-5'] },
+  ];
+  assert.deepEqual(pickJudgeModel(sites), { siteId: 'c', model: 'claude-sonnet-4-5' });
+  assert.deepEqual(pickJudgeModel(sites.slice(0, 2)), { siteId: 'b', model: 'deepseek-chat' });
+  assert.equal(pickJudgeModel([{ id: 'x', apiKey: 'k', models: ['text-embedding-3'] }]), null);
+  assert.equal(pickJudgeModel([]), null);
 });
 
 test('buildJudgePrompt 包含统计与质量题', () => {

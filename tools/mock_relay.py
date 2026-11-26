@@ -118,7 +118,8 @@ class Handler(BaseHTTPRequestHandler):
             SPENT[site] += 0.0013
 
         if not body.get("stream"):
-            text = judge_reply(prompt) if model == "judge-model" else answer_for(prompt, site)
+            is_judge = model == "judge-model" or "评审员" in system or "选型顾问" in system
+            text = judge_reply(prompt) if is_judge else answer_for(prompt, site)
             time.sleep(random.uniform(0.3, 0.8))
             if anthropic:
                 return self._json(200, {"id": "msg_mock", "type": "message", "content": [{"type": "text", "text": text}], "usage": {"input_tokens": 10, "output_tokens": 50}})

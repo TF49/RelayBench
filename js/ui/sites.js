@@ -3,7 +3,9 @@ import { state, addSite, updateSite, removeSite } from '../state.js';
 import {
   normalizeBaseUrl, siteNameFromUrl, parseBulkImport, detectSite, listModels, preselectModels, SITE_TYPE_LABELS,
 } from '../core/relay.js';
-import { esc, toast, fmtBalance, maskKey, fmtTime, confirmBox, $ } from './dom.js';
+import { esc, toast, fmtBalance, maskKey, fmtTime, fmtMs, fmtPct, fmtNum, scoreColor, confirmBox, $ } from './dom.js';
+import { startRun } from './run.js';
+import { ERROR_LABELS } from '../core/errors.js';
 
 const ui = { panel: '', checking: new Set() };
 
@@ -42,7 +44,8 @@ export function render(root) {
       <div class="actions">
         <button class="btn" data-act="toggle-bulk">批量导入</button>
         <button class="btn" data-act="toggle-add">添加站点</button>
-        <button class="btn primary" data-act="check-all">全部检测</button>
+        <button class="btn" data-act="check-all">全部检测</button>
+        <button class="btn primary" data-act="run-all">开始测试全部 →</button>
       </div>
     </div>
 
@@ -134,7 +137,9 @@ function siteCard(s) {
       </dl>
       ${sel.length ? `<div class="chips">${chips}</div>` : ''}
       ${s.detectError ? `<div class="err-line">${esc(s.detectError)}</div>` : ''}
+      ${lastResultTemplate(s)}
       <div class="foot">
+        <button class="btn sm primary" data-act="run-one" data-id="${s.id}" ${s.apiKey && sel.length ? '' : 'disabled'} title="${sel.length ? '只测试这个站点已勾选的模型' : '先勾选模型'}">测试</button>
         <button class="btn sm" data-act="check" data-id="${s.id}" ${checking ? 'disabled' : ''}>检测</button>
         <button class="btn sm" data-act="pick" data-id="${s.id}" ${s.models?.length ? '' : 'disabled'}>选择模型</button>
         <span style="flex:1"></span>
@@ -142,6 +147,37 @@ function siteCard(s) {
         <button class="btn sm ghost danger" data-act="remove" data-id="${s.id}">删除</button>
       </div>
     </div>`;
+}
+
+/** 卡片上的最近一次测试结果：每个模型一行。 */
+function lastResultTemplate(s) {
+  const lr = s.lastResult;
+  if (!lr?.models || !Object.keys(lr.models).length) {
+    return s.models?.length
+      ? '<div class="notice info" style="font-size:12.5px">还没测过：点下方「测试」开始，测完这里会显示得分、成功率、首字延迟和报错。</div>'
+      : '';
+  }
+  const rows = Object.entries(lr.models).sort((a, b) => b[1].final - a[1].final).map(([m, r]) => {
+    const errs = (r.errors || []).map(([k, v]) => `${ERROR_LABELS[k] || k}×${v}`).join(' ');
+    return `<tr title="${esc(r.verdict || '')}">
+      <td class="mono ellipsis" style="max-width:130px">${esc(m)}</td>
+      <td class="num"><b style="color:${scoreColor(r.final)}">${r.final}</b>${r.ai != null ? '<span class="faint" style="font-size:11px"> AI</span>' : ''}</td>
+      <td class="num">${fmtPct(r.successRate, 0)}</td>
+      <td class="num">${fmtMs(r.ttftP50)}</td>
+      <td class="num">${fmtNum(r.tpsP50, 0)}</td>
+      <td>${errs ? `<span style="color:var(--bad)">${esc(errs)}</span>` : '<span class="faint">无</span>'}</td>
+    </tr>`;
+  }).join('');
+  return `<div>
+    <div class="section-title" style="display:flex;justify-content:space-between">
+      <span>最近测试 ${lr.aborted ? '<span class="badge warn">中途停止</span>' : ''}</span>
+      <a href="#report" data-act="open-report" data-run="${esc(lr.runId)}" class="faint" style="font-weight:400;font-size:12px">${esc(fmtTime(lr.at))} · 查看报告</a>
+    </div>
+    <div class="table-wrap"><table class="tbl mini">
+      <thead><tr><th>模型</th><th class="num">得分</th><th class="num">成功率</th><th class="num">首字</th><th class="num">TPS</th><th>报错</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
 }
 
 async function onClick(e) {
@@ -163,6 +199,17 @@ async function onClick(e) {
     toast(`已检测 ${targets.length} 个站点`, 'ok');
   } else if (act === 'check' && site) {
     await checkSite(site);
+  } else if (act === 'run-one' && site) {
+    startRun([site.id]);
+  } else if (act === 'run-all') {
+    startRun();
+  } else if (act === 'open-report') {
+    e.preventDefault();
+    const { loadRun } = await import('../state.js');
+    const { showRun } = await import('./report.js');
+    const run = await loadRun(btn.dataset.run);
+    if (run) showRun(run);
+    else toast('该报告已被删除', 'bad');
   } else if (act === 'pick' && site) {
     openModelPicker(site);
   } else if (act === 'remove' && site) {

@@ -94,6 +94,36 @@ function toList(v) {
   return [];
 }
 
+// 自动挑选评审模型的偏好顺序（越靠前越优先）。
+const JUDGE_PREFERENCE = [
+  /claude-(opus|sonnet)-4/i,
+  /claude-3[.-]7-sonnet/i,
+  /^gpt-5(\.\d+)?(-chat)?(-latest)?$/i,
+  /gpt-4\.1(?!-(mini|nano))/i,
+  /gpt-4o(?!-mini)/i,
+  /gemini-(2\.5|3)[\w.-]*-pro/i,
+  /deepseek-(chat|v3|reasoner|r1)/i,
+  /qwen3?-(max|plus)/i,
+  /claude/i,
+  /gpt-5/i,
+];
+
+/**
+ * 从已添加站点中挑一个最适合当评审的模型。
+ * sites: [{id, apiKey, models[]}]；只考虑有 Key 且拉到模型的站点。
+ * @returns {{siteId:string, model:string}|null}
+ */
+export function pickJudgeModel(sites) {
+  const usable = (sites || []).filter((s) => s.apiKey && s.models?.length);
+  for (const re of JUDGE_PREFERENCE) {
+    for (const s of usable) {
+      const m = s.models.find((x) => re.test(x) && !/(embed|image|audio|tts|whisper|vision-preview|instruct)/i.test(x));
+      if (m) return { siteId: s.id, model: m };
+    }
+  }
+  return null;
+}
+
 export const SUMMARY_SYSTEM = '你是 API 中转渠道选型顾问。根据多个站点/模型的测评结果，用简洁中文给出结论。不要使用 Markdown 标题，可以用短段落和「·」开头的要点。';
 
 /** rows: [{siteName, model, final, rule, ai, successRate, ttftP50, tpsP50, topErrors, verdict}] */

@@ -1,9 +1,10 @@
 // 测试视图 + 运行控制器（运行状态挂在 state.current 上，切换视图不影响运行）。
-import { state, notify, saveRun } from '../state.js';
+import { state, notify, saveRun, updateSite, resolveJudge } from '../state.js';
 import { runBenchmark } from '../core/runner.js';
 import { QUALITY_PROBES } from '../core/probes.js';
 import { ERROR_LABELS } from '../core/errors.js';
 import { SITE_TYPE_LABELS } from '../core/relay.js';
+import { topErrors } from '../core/stats.js';
 import { esc, toast, fmtMs, fmtPct, fmtNum, fmtClock, fmtDuration, $ } from './dom.js';
 
 const LOG_LIMIT = 200;
@@ -12,22 +13,50 @@ function eligibleSites() {
   return state.sites.filter((s) => s.apiKey && s.selectedModels?.length);
 }
 
-function judgeReady() {
-  const j = state.judge;
-  return j.enabled && j.baseUrl && j.apiKey && j.model;
+/** 把本次结果写回站点卡片（每个模型一行摘要）。 */
+async function saveLastResults(run) {
+  for (const rs of run.sites) {
+    const items = run.items.filter((it) => it.siteId === rs.id && it.stats.total > 0);
+    if (!items.length) continue;
+    const models = {};
+    for (const it of items) {
+      models[it.model] = {
+        final: it.final,
+        grade: it.grade,
+        ai: it.ai?.score ?? null,
+        successRate: it.stats.successRate,
+        success: it.stats.success,
+        total: it.stats.total,
+        ttftP50: it.stats.ttft.p50,
+        tpsP50: it.stats.tps.p50,
+        errors: topErrors(it.stats.errors, 2),
+        verdict: it.ai?.verdict || '',
+      };
+    }
+    await updateSite(rs.id, {
+      lastResult: { runId: run.id, at: run.startedAt, aborted: run.aborted, models },
+      ...(rs.balanceAfter ? { balance: rs.balanceAfter } : {}),
+    });
+  }
 }
 
-export async function startRun() {
-  if (state.current?.status === 'running') return;
-  const sites = eligibleSites();
+/** @param {string[]} [onlySiteIds] 只测这些站点（站点卡片上的「测试」按钮） */
+export async function startRun(onlySiteIds) {
+  if (state.current?.status === 'running') {
+    toast('已有测试在运行', 'bad');
+    location.hash = '#run';
+    return;
+  }
+  const sites = eligibleSites().filter((s) => !onlySiteIds || onlySiteIds.includes(s.id));
   if (!sites.length) {
-    toast('没有可测试的站点：需要已填 Key 且勾选了模型', 'bad');
+    toast(onlySiteIds ? '这个站点还不能测：需要填 Key 并勾选至少一个模型' : '没有可测试的站点：需要已填 Key 且勾选了模型', 'bad', 5000);
     return;
   }
-  if (state.judge.enabled && !judgeReady()) {
-    toast('已启用 AI 评审，但评审渠道的地址/Key/模型不完整，请到「设置」补全', 'bad', 5000);
-    return;
+  const judge = resolveJudge();
+  if (state.judge.enabled && !judge) {
+    toast('没有可用的 AI 评审模型，本次只给规则分（可在「设置」中配置）', 'info', 5000);
   }
+  location.hash = '#run';
   const abort = new AbortController();
   const cur = {
     status: 'running', phase: 'balance', message: '准备中…', startedAt: Date.now(), abort,
@@ -77,7 +106,7 @@ export async function startRun() {
         type: s.type, selectedModels: [...s.selectedModels],
       })),
       settings: state.settings,
-      judge: state.judge.enabled ? { ...state.judge } : null,
+      judge: judge ? { enabled: true, ...judge } : null,
       signal: abort.signal,
       onEvent,
     });
@@ -85,7 +114,10 @@ export async function startRun() {
     cur.status = 'done';
     if (run.items.some((it) => it.stats.total > 0)) {
       await saveRun(run);
+      await saveLastResults(run);
       state.viewingRun = run;
+      // 跑完直接看报告（用户还停在测试页时）
+      if (location.hash === '#run' || location.hash === '') location.hash = '#report';
     }
     toast(run.aborted ? '测试已停止，已保存部分结果' : '测试完成', run.aborted ? 'info' : 'ok');
   } catch (err) {
@@ -149,6 +181,7 @@ function preflightTemplate() {
   const models = sites.reduce((n, s) => n + s.selectedModels.length, 0);
   const skipped = state.sites.length - sites.length;
   const j = state.judge;
+  const judge = resolveJudge();
   return `
     <div class="page-head">
       <div><h1>测试</h1><p>对已勾选的模型批量发请求，统计报错、速度和稳定性，再由评审模型打分。</p></div>
@@ -163,9 +196,9 @@ function preflightTemplate() {
       </div>
       <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px">
         ${skipped > 0 ? `<div class="notice">有 ${skipped} 个站点因缺少 Key 或未勾选模型被跳过，可到「站点」页处理。</div>` : ''}
-        ${j.enabled && judgeReady()
-          ? `<div class="notice info">AI 评审：${esc(j.model)} @ ${esc(j.baseUrl)}，综合分 = 规则分 × ${fmtNum(1 - st.aiWeight, 1)} + AI 分 × ${fmtNum(st.aiWeight, 1)}</div>`
-          : `<div class="notice">未启用 AI 评审，只给规则分。可在 <a href="#settings">设置</a> 中配置评审渠道。</div>`}
+        ${judge
+          ? `<div class="notice info">AI 评审：<b class="mono">${esc(judge.model)}</b> @ ${esc(judge.label)}${judge.auto ? '（自动挑选）' : ''}，综合分 = 规则分 × ${fmtNum(1 - st.aiWeight, 1)} + AI 分 × ${fmtNum(st.aiWeight, 1)}。<a href="#settings">更换</a></div>`
+          : `<div class="notice">${j.enabled ? '没有可用的 AI 评审模型' : 'AI 评审已关闭'}，本次只给规则分。可在 <a href="#settings">设置</a> 中配置。</div>`}
       </div>
       <div class="actions" style="margin-top:18px">
         <button class="btn primary lg" data-act="start" ${sites.length ? '' : 'disabled'}>开始测试</button>
