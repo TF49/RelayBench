@@ -3,7 +3,7 @@
 // sub2api: GET /v1/usage
 import { fetchJson, bearer } from './http.js';
 
-export const SITE_TYPE_LABELS = { newapi: 'new-api', sub2api: 'sub2api', generic: '通用兼容', unknown: '未检测' };
+export const SITE_TYPE_LABELS = { newapi: 'new-api', sub2api: 'sub2api', oneapi: 'one-api 兼容', generic: '通用兼容', unknown: '未检测' };
 
 export function normalizeBaseUrl(input) {
   let u = String(input || '').trim();
@@ -78,6 +78,26 @@ export function parseSub2apiUsage(json) {
   };
 }
 
+/**
+ * one-api / 旧版 new-api 的 OpenAI 风格账单接口。
+ * hard_limit_usd 为总额度（剩余 + 已用），total_usage 为已用 × 100。
+ */
+export function parseBillingUsage(sub, usage) {
+  const hard = Number(sub?.hard_limit_usd);
+  if (!Number.isFinite(hard)) return null;
+  const used = Number(usage?.total_usage);
+  const usedUsd = Number.isFinite(used) ? used / 100 : null;
+  const unlimited = hard >= 100000000;
+  return {
+    unit: 'USD',
+    unlimited,
+    remaining: unlimited || usedUsd == null ? (unlimited ? null : hard) : Math.max(0, hard - usedUsd),
+    used: usedUsd,
+    expiresAt: sub.access_until > 0 ? sub.access_until * 1000 : null,
+    note: usedUsd == null ? '总额度（未取到已用）' : '',
+  };
+}
+
 export function parseModels(json) {
   const list = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
   const ids = list.map((m) => (typeof m === 'string' ? m : m?.id)).filter((x) => typeof x === 'string' && x);
@@ -111,6 +131,11 @@ export async function detectSite(baseUrl, apiKey, { fetchImpl, signal } = {}) {
   }
   if (su.data?.code && /API_KEY|INVALID|INSUFFICIENT/i.test(String(su.data.code))) {
     return { type: 'sub2api', balance: null, error: su.data.message || su.data.code };
+  }
+  const sub = await fetchJson(`${baseUrl}/dashboard/billing/subscription`, { headers: auth, fetchImpl, signal });
+  if (sub.ok && sub.data && sub.data.hard_limit_usd != null) {
+    const usage = await fetchJson(`${baseUrl}/dashboard/billing/usage`, { headers: auth, fetchImpl, signal });
+    return { type: 'oneapi', balance: parseBillingUsage(sub.data, usage.ok ? usage.data : null), error: '' };
   }
   return { type: 'generic', balance: null, error: '' };
 }

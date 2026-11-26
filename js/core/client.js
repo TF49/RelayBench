@@ -206,7 +206,7 @@ export async function runChat({
   const rec = {
     model, protocol, ok: false, status: 0, errorType: '', errorLabel: '', errorMessage: '', requestId: '',
     ttftMs: null, totalMs: null, outputTokens: null, tokensEstimated: false, tps: null,
-    text: '', reasoningChars: 0, streamed: true, startedAt: Date.now(),
+    text: '', reasoningChars: 0, streamed: true, startedAt: Date.now(), queueMs: 0,
   };
   const req = buildRequest({ baseUrl, apiKey, model, protocol, prompt, stream: true, maxTokens });
   const ctrl = new AbortController();
@@ -221,6 +221,10 @@ export async function runChat({
   const ttftTimer = setTimeout(() => abortWith('ttft_timeout'), ttftTimeoutMs);
   const totalTimer = setTimeout(() => abortWith('total_timeout'), totalTimeoutMs);
   const t0 = now();
+  // 请求在浏览器/本地代理里排队的时间（浏览器对同一主机最多 6 个连接）。
+  // 由代理回传的 X-RB-Upstream-Ms 推算，并从首字和总耗时里扣除，只保留中转站自身耗时。
+  let overhead = 0;
+  const elapsed = () => now() - t0 - overhead;
   let gotFirst = false;
   const acc = newAccumulator();
 
@@ -235,6 +239,11 @@ export async function runChat({
     const res = await proxyFetch(req.url, {
       method: 'POST', headers: req.headers, body: JSON.stringify(req.body), signal: ctrl.signal, fetchImpl,
     });
+    const upHeader = res.headers.get('x-rb-upstream-ms');
+    if (upHeader !== null && Number.isFinite(Number(upHeader))) {
+      overhead = Math.max(0, now() - t0 - Number(upHeader));
+      rec.queueMs = Math.round(overhead);
+    }
     rec.status = res.status;
     if (!res.ok) {
       const body = await res.text();
@@ -268,7 +277,7 @@ export async function runChat({
         acc.usageOut = full.usageOut;
         acc.done = true;
       }
-      rec.ttftMs = now() - t0;
+      rec.ttftMs = elapsed();
     } else {
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -278,7 +287,7 @@ export async function runChat({
           const r = interpretEvent(ev, acc);
           if (r.token && !gotFirst) {
             gotFirst = true;
-            rec.ttftMs = now() - t0;
+            rec.ttftMs = elapsed();
             clearTimeout(ttftTimer);
           }
         }
@@ -297,7 +306,7 @@ export async function runChat({
       }
     }
 
-    rec.totalMs = now() - t0;
+    rec.totalMs = elapsed();
     rec.text = acc.text;
     rec.reasoningChars = acc.reasoning.length;
     if (acc.error) {
@@ -324,7 +333,7 @@ export async function runChat({
     if (rec.streamed && genMs >= 100 && rec.outputTokens > 1) rec.tps = rec.outputTokens / (genMs / 1000);
     return rec;
   } catch (e) {
-    rec.totalMs = now() - t0;
+    rec.totalMs = elapsed();
     rec.text = acc.text;
     if (reason) {
       const msg = reason === 'ttft_timeout' ? `首字超时（>${Math.round(ttftTimeoutMs / 1000)}s）`

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { classifyError, parseErrorBody, extractRequestId } from '../js/core/errors.js';
 import { SSEParser, interpretEvent, newAccumulator, runChat, parseFullResponse, resolveProtocol, buildRequest, estimateTokens } from '../js/core/client.js';
-import { normalizeBaseUrl, parseBulkImport, parseNewApiUsage, parseSub2apiUsage, parseModels, preselectModels, balanceDelta, detectSite } from '../js/core/relay.js';
+import { normalizeBaseUrl, parseBulkImport, parseNewApiUsage, parseSub2apiUsage, parseBillingUsage, parseModels, preselectModels, balanceDelta, detectSite } from '../js/core/relay.js';
 import { percentile, computeStats } from '../js/core/stats.js';
 import { ruleScore, grade, combineScore, linear } from '../js/core/scoring.js';
 import { parseJudgeResponse, buildJudgePrompt } from '../js/core/judge.js';
@@ -121,8 +121,8 @@ test('runChat: 成功流式请求计时与 token', async () => {
       'data: {"choices":[],"usage":{"completion_tokens":20}}\n\ndata: [DONE]\n\n',
     ]);
   };
-  let calls = 0;
-  const now = () => { calls += 1; return calls === 1 ? 0 : calls === 2 ? 400 : 1400; };
+  const ticks = [0, 400, 1400];
+  const now = () => ticks.shift();
   const rec = await runChat({ baseUrl: 'https://x.com', apiKey: 'k', model: 'gpt', protocol: 'openai', prompt: 'p', fetchImpl, now });
   assert.equal(rec.ok, true, rec.errorMessage);
   assert.equal(rec.text, 'Hello world');
@@ -131,6 +131,26 @@ test('runChat: 成功流式请求计时与 token', async () => {
   assert.equal(rec.outputTokens, 20);
   assert.equal(rec.tps, 20);
   assert.ok(clock);
+});
+
+test('runChat: 扣除浏览器/代理排队时间', async () => {
+  // t0=0；响应头在 300ms 到达，但代理说上游只用了 50ms → 排队 250ms
+  const ticks = [0, 300, 700, 1700];
+  const now = () => ticks.shift();
+  const fetchImpl = async () => {
+    const res = sseResponse([
+      'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ]);
+    const h = new Headers(res.headers);
+    h.set('x-rb-upstream-ms', '50');
+    return new Response(res.body, { status: 200, headers: h });
+  };
+  const rec = await runChat({ baseUrl: 'https://x.com', apiKey: 'k', model: 'gpt', protocol: 'openai', prompt: 'p', fetchImpl, now });
+  assert.equal(rec.ok, true, rec.errorMessage);
+  assert.equal(rec.queueMs, 250);
+  assert.equal(rec.ttftMs, 450);
+  assert.equal(rec.totalMs, 1450);
 });
 
 test('runChat: HTTP 错误、断流、空回复、首字超时', async () => {
@@ -197,8 +217,17 @@ test('detectSite: new-api / sub2api / 通用', async () => {
   d = await detectSite('https://s.com', 'k', { fetchImpl: mk({ '/v1/usage': { mode: 'unrestricted', balance: 8, remaining: 8 } }) });
   assert.equal(d.type, 'sub2api');
   assert.equal(d.balance.remaining, 8);
+  d = await detectSite('https://o.com', 'k', { fetchImpl: mk({ '/dashboard/billing/subscription': { object: 'billing_subscription', hard_limit_usd: 20, access_until: 0 }, '/dashboard/billing/usage': { object: 'list', total_usage: 550 } }) });
+  assert.equal(d.type, 'oneapi');
+  assert.equal(d.balance.remaining, 14.5);
+  assert.equal(d.balance.used, 5.5);
   d = await detectSite('https://g.com', 'k', { fetchImpl: mk({}) });
   assert.equal(d.type, 'generic');
+});
+
+test('parseBillingUsage: 无限额度', () => {
+  assert.equal(parseBillingUsage({ hard_limit_usd: 100000000 }, { total_usage: 0 }).unlimited, true);
+  assert.equal(parseBillingUsage({}, {}), null);
 });
 
 test('parseModels / preselectModels', () => {

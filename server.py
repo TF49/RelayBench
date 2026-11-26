@@ -19,6 +19,7 @@ import json
 import os
 import socket
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -152,6 +153,7 @@ class Handler(SimpleHTTPRequestHandler):
             target, data=body, method=method,
             headers=filter_request_headers(self.headers.items()),
         )
+        started = time.monotonic()
         try:
             resp = _OPENER.open(req, timeout=UPSTREAM_TIMEOUT_SECONDS)
         except urllib.error.HTTPError as e:
@@ -166,15 +168,17 @@ class Handler(SimpleHTTPRequestHandler):
             self._proxy_error(502, f"代理异常：{e}", "proxy_error")
             return
 
+        # 上游返回响应头所用时间。浏览器用它扣除本地排队（浏览器同主机 6 连接上限等）带来的延迟。
+        upstream_ms = int((time.monotonic() - started) * 1000)
         try:
-            self._stream_back(resp)
+            self._stream_back(resp, upstream_ms)
         finally:
             try:
                 resp.close()
             except Exception:  # noqa: BLE001
                 pass
 
-    def _stream_back(self, resp) -> None:
+    def _stream_back(self, resp, upstream_ms: int) -> None:
         status = getattr(resp, "status", None) or getattr(resp, "code", 502)
         self.send_response(status)
         for key, value in resp.headers.items():
@@ -182,6 +186,7 @@ class Handler(SimpleHTTPRequestHandler):
                 continue
             self.send_header(key, value)
         self.send_header("X-RB-Proxy", "1")
+        self.send_header("X-RB-Upstream-Ms", str(upstream_ms))
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True

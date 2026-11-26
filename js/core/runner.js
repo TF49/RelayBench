@@ -43,11 +43,14 @@ export class Semaphore {
   }
 }
 
+export const MAX_GLOBAL_CONCURRENCY = 6;
+
 export const DEFAULT_SETTINGS = {
   requestsPerModel: 10,
   qualityProbes: true,
   concurrencyPerSite: 3,
-  concurrencyGlobal: 8,
+  // 浏览器对同一主机（本地代理）最多 6 个 HTTP/1.1 连接，超过会在浏览器内排队
+  concurrencyGlobal: 6,
   ttftTimeoutSec: 30,
   totalTimeoutSec: 120,
   aiWeight: 0.4,
@@ -141,7 +144,7 @@ export async function runBenchmark({ sites, settings: rawSettings, judge, signal
 
   // 2) 批量请求
   emit({ type: 'phase', phase: 'requests', message: '批量请求中…' });
-  const global = new Semaphore(settings.concurrencyGlobal);
+  const global = new Semaphore(Math.min(MAX_GLOBAL_CONCURRENCY, settings.concurrencyGlobal));
   await Promise.all(sites.map(async (site) => {
     const queue = interleave(jobs.filter((j) => j.siteId === site.id));
     const worker = async () => {

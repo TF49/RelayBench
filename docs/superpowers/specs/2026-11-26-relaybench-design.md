@@ -48,6 +48,7 @@ tests/*.test.mjs        核心模块单测
 - **类型识别 + 余额**（失败不阻塞）：
   - `GET /api/usage/token/`（Bearer）返回 `{code:true,data:{total_available,total_used,unlimited_quota,expires_at}}` → new-api。额度单位换算用 `GET /api/status` 的 `quota_per_unit`（缺省 500000/USD）。
   - 否则 `GET /v1/usage` 返回 `remaining` / `quota` / `balance` → sub2api（单位 USD）。
+  - 否则 `GET /dashboard/billing/subscription` + `/dashboard/billing/usage`（one-api / 旧版 new-api）→ 「one-api 兼容」。剩余 = `hard_limit_usd − total_usage/100`。
   - 都失败 → 「通用 OpenAI 兼容」，不显示余额。
 - **模型列表**：`GET /v1/models`（Bearer）→ `data[].id`。按「常用模型」关键字（设置里可改）自动预选。
 - **协议**：站点级 `auto | openai | anthropic`。auto：模型名含 `claude` → `POST /v1/messages`（同时带 `Authorization` 与 `x-api-key`、`anthropic-version: 2023-06-01`，`max_tokens: 1024`）；其他 → `POST /v1/chat/completions`（`stream_options.include_usage`，不传长度上限以兼容新模型）。
@@ -59,11 +60,12 @@ tests/*.test.mjs        核心模块单测
 
 - **稳定性请求** N 次（默认 10），全部流式。提示词从题库轮换并带随机话题，避免缓存命中。
 - **质量题** 4 道（各 1 次，流式，同样计入统计）：算术、指令遵循（格式）、JSON 输出、简单推理。本地按标准答案判 pass/fail。
-- 并发：每个站点×模型内并发（默认 3），全局并发上限（默认 8）。
+- 并发：每站并发（默认 3），全局并发上限 6（浏览器对同一主机最多 6 个 HTTP/1.1 连接，超过会在浏览器内排队、虚增延迟）。
+- 计时校正：代理回传 `X-RB-Upstream-Ms`（上游返回响应头的耗时），前端用「响应头到达时间 − 该值」估算本地排队时间，并从首字与总耗时中扣除。
 - 超时：首字超时 30s、总超时 120s（可配）。
 - 随时可停止：中止信号传到所有在途请求。
 
-每次请求记录：`ok, status, errorType, errorMessage, requestId, ttftMs, totalMs, outputTokens, tps, text(截断 2000 字)`。
+每次请求记录：`ok, status, errorType, errorMessage, requestId, ttftMs, totalMs, queueMs, outputTokens, tps, text`（稳定性请求截断 300 字，质量题 1500 字）。
 
 ## 5. 错误分类
 
